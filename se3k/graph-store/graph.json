@@ -1,0 +1,182 @@
+{
+  "nodes": [
+    {
+      "id": "person:U_DANA",
+      "type": "Person",
+      "label": "Dana Okafor",
+      "slackUserId": "U_DANA"
+    },
+    {
+      "id": "person:U_MIA",
+      "type": "Person",
+      "label": "Mia Chen",
+      "slackUserId": "U_MIA"
+    },
+    {
+      "id": "person:U_LEO",
+      "type": "Person",
+      "label": "Leo Martins",
+      "slackUserId": "U_LEO"
+    },
+    {
+      "id": "person:U_SAM",
+      "type": "Person",
+      "label": "Sam Reyes",
+      "slackUserId": "U_SAM"
+    },
+    {
+      "id": "project:rate-limiting",
+      "type": "Project",
+      "label": "API gateway rate limiting"
+    },
+    {
+      "id": "project:billing-webhooks",
+      "type": "Project",
+      "label": "Billing webhooks"
+    },
+    {
+      "id": "decision:drop-redis-ratelimit",
+      "type": "Decision",
+      "label": "Drop the Redis-backed rate limiter in favor of an in-process token bucket",
+      "meta": {
+        "summary": "Drop the Redis-backed rate limiter in favor of an in-process token bucket"
+      }
+    }
+  ],
+  "edges": [
+    {
+      "id": "INVOLVED_IN:person:U_DANA->project:rate-limiting",
+      "type": "INVOLVED_IN",
+      "from": "person:U_DANA",
+      "to": "project:rate-limiting",
+      "weight": 1,
+      "last_active": "2026-02-10T13:27:53.045Z",
+      "sources": [
+        {
+          "channel": "#backend",
+          "channelId": "C_BACKEND",
+          "ts": "2026-02-10T13:27:53.045Z",
+          "excerpt": "I'll own rate-limiting for this quarter."
+        }
+      ]
+    },
+    {
+      "id": "INVOLVED_IN:person:U_MIA->project:rate-limiting",
+      "type": "INVOLVED_IN",
+      "from": "person:U_MIA",
+      "to": "project:rate-limiting",
+      "weight": 13,
+      "last_active": "2026-06-28T13:27:53.045Z",
+      "sources": [
+        {
+          "channel": "#backend",
+          "channelId": "C_BACKEND",
+          "ts": "2026-06-18T13:27:53.045Z",
+          "excerpt": "Traced the 429 storms to Redis round-trips under burst load."
+        },
+        {
+          "channel": "#backend",
+          "channelId": "C_BACKEND",
+          "ts": "2026-06-23T13:27:53.045Z",
+          "excerpt": "Shipped the in-process token bucket; p99 dropped from 180ms to 22ms."
+        },
+        {
+          "channel": "#backend",
+          "channelId": "C_BACKEND",
+          "ts": "2026-06-28T13:27:53.045Z",
+          "excerpt": "Answered the on-call thread about tuning the burst size."
+        }
+      ]
+    },
+    {
+      "id": "INVOLVED_IN:person:U_LEO->project:rate-limiting",
+      "type": "INVOLVED_IN",
+      "from": "person:U_LEO",
+      "to": "project:rate-limiting",
+      "weight": 3,
+      "last_active": "2026-06-23T13:27:53.045Z",
+      "sources": [
+        {
+          "channel": "#backend",
+          "channelId": "C_BACKEND",
+          "ts": "2026-06-23T13:27:53.045Z",
+          "excerpt": "Reviewed and merged the token-bucket PR; suggested the jitter window."
+        }
+      ]
+    },
+    {
+      "id": "INVOLVED_IN:person:U_DANA->project:billing-webhooks",
+      "type": "INVOLVED_IN",
+      "from": "person:U_DANA",
+      "to": "project:billing-webhooks",
+      "weight": 4,
+      "last_active": "2026-06-10T13:27:53.045Z",
+      "sources": [
+        {
+          "channel": "#backend",
+          "channelId": "C_BACKEND",
+          "ts": "2026-06-10T13:27:53.045Z",
+          "excerpt": "Rebuilt the Stripe webhook retry logic."
+        }
+      ]
+    },
+    {
+      "id": "RAISED_CONCERN:person:U_SAM->decision:drop-redis-ratelimit",
+      "type": "RAISED_CONCERN",
+      "from": "person:U_SAM",
+      "to": "decision:drop-redis-ratelimit",
+      "weight": 1,
+      "last_active": "2026-06-19T13:27:53.045Z",
+      "sources": [
+        {
+          "channel": "#backend",
+          "channelId": "C_BACKEND",
+          "ts": "2026-06-19T13:27:53.045Z",
+          "excerpt": "Worried in-process limits drift across pods without shared state."
+        }
+      ]
+    },
+    {
+      "id": "RAISED_CONCERN:person:U_LEO->decision:drop-redis-ratelimit",
+      "type": "RAISED_CONCERN",
+      "from": "person:U_LEO",
+      "to": "decision:drop-redis-ratelimit",
+      "weight": 1,
+      "last_active": "2026-06-20T13:27:53.045Z",
+      "sources": [
+        {
+          "channel": "#backend",
+          "channelId": "C_BACKEND",
+          "ts": "2026-06-20T13:27:53.045Z",
+          "excerpt": "Asked how we handle a pod restart losing its bucket counts."
+        }
+      ]
+    },
+    {
+      "id": "MADE_CALL:person:U_MIA->decision:drop-redis-ratelimit",
+      "type": "MADE_CALL",
+      "from": "person:U_MIA",
+      "to": "decision:drop-redis-ratelimit",
+      "weight": 1,
+      "last_active": "2026-06-22T13:27:53.045Z",
+      "sources": [
+        {
+          "channel": "#backend",
+          "channelId": "C_BACKEND",
+          "ts": "2026-06-22T13:27:53.045Z",
+          "excerpt": "Decided per-pod buckets are fine: limits are advisory and Redis latency was the real outage cause."
+        }
+      ]
+    },
+    {
+      "id": "RELATES_TO:decision:drop-redis-ratelimit->project:rate-limiting",
+      "type": "RELATES_TO",
+      "from": "decision:drop-redis-ratelimit",
+      "to": "project:rate-limiting",
+      "weight": 1,
+      "last_active": "2026-06-22T13:27:53.045Z",
+      "sources": []
+    }
+  ],
+  "updatedAt": "2026-06-30T13:27:53.045Z"
+}
