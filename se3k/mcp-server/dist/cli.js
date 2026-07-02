@@ -3,9 +3,6 @@ Object.defineProperty(exports, "__esModule", { value: true });
 require("dotenv/config");
 const store_1 = require("./graph/store");
 const answer_1 = require("./llm/answer");
-// Quick local tester (no Slack, no MCP plumbing):
-//   pnpm ask "who do I talk to about rate limiting?"
-//   pnpm ask "why did we drop the redis rate limiter?"
 async function main() {
     const question = process.argv.slice(2).join(' ').trim();
     if (!question) {
