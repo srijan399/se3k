@@ -73,6 +73,7 @@ export interface ExtractedInvolvement {
   weight: number; // contribution from this batch (msgs/replies/fixes)
   ts: string; // ISO timestamp of the activity
   evidence: string; // short quote/justification for the citation
+  ref?: string; // "[mN]" tag of the source message → real ts + Slack permalink
 }
 
 export interface ExtractedDecisionEdge {
@@ -81,7 +82,17 @@ export interface ExtractedDecisionEdge {
   type: 'RAISED_CONCERN' | 'MADE_CALL';
   ts: string;
   evidence: string;
+  ref?: string; // "[mN]" tag of the source message → real ts + Slack permalink
 }
+
+// Per-batch map of message tag → real Slack coordinates, supplied by the bot so
+// citations can link straight to the exact message ("proof").
+export interface MessageRef {
+  ts?: string;
+  permalink?: string;
+  text?: string; // original message text, so a source can be recovered by evidence match
+}
+export type MessageRefs = Record<string, MessageRef>;
 
 export interface ExtractedRelation {
   decision: string;

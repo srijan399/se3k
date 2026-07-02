@@ -1,15 +1,19 @@
 import 'dotenv/config';
 import { GraphStore } from './graph/store';
 
-// Deliberate demo scenario that proves the core behavior:
-// - "rate-limiting" is FORMALLY owned by Dana, who has since gone quiet.
-// - Mia actually debugged + fixed it across threads, recently → the real expert.
-// - Leo reviewed/merged → strong runner-up.
-// - A decision (drop Redis-based limiter) has real dissent (Sam) and a final
-//   call (Mia), proving decision provenance, not just an outcome.
+// Deterministic demo graph that mirrors the two TESTING.md scenarios, using the
+// real workspace cast. It's the offline insurance: the dashboard and /ask-graph
+// answer correctly even with no LLM key or before anyone posts.
 //
-// This is the plan's "hand-seeded graph" insurance: the demo answers correctly
-// even if live LLM extraction is unavailable. Run with: pnpm seed
+// Roles (assignee ≠ expert, both ways):
+//   #backend  — Adam formally owns checkout but hands it off; IVAN does the work.
+//   #frontend — Adam owns the frontend on paper; RAHUL does the work.
+//   Sam relays support tickets (low weight). Adam raises the concerns; the doers
+//   make the calls.
+//
+// hackathon shortcut: no slackUserId on seeded people — they render as plain
+// names so a cold-open Slack demo never shows a broken <@id> mention. Live
+// ingestion supplies real ids (see store.ingest `authors`). Run with: pnpm seed
 
 function daysAgo(n: number): string {
   return new Date(Date.now() - n * 86_400_000).toISOString();
@@ -18,87 +22,103 @@ function daysAgo(n: number): string {
 export function seed(store: GraphStore): void {
   store.clear();
 
-  // ---- People ----
-  const dana = store.upsertPerson('Dana Okafor', 'U_DANA'); // formal owner, now inactive
-  const mia = store.upsertPerson('Mia Chen', 'U_MIA'); // actual expert
-  const leo = store.upsertPerson('Leo Martins', 'U_LEO'); // reviewer / runner-up
-  const sam = store.upsertPerson('Sam Reyes', 'U_SAM'); // raised the dissent
+  // ---- People (real cast) ----
+  const adam = store.upsertPerson('Adam Reyes'); // CEO / Sr. Backend — formal owner, hands off
+  const ivan = store.upsertPerson('Ivan Sanders'); // Forward Deployed — backend expert
+  const rahul = store.upsertPerson('Rahul Sharma'); // Frontend Developer — frontend expert
+  const sam = store.upsertPerson('Sam Okafor'); // Director, Customer Service — relays tickets
 
   // ---- Projects ----
-  const rl = store.upsertProject('rate-limiting', 'API gateway rate limiting');
-  const billing = store.upsertProject('billing-webhooks', 'Billing webhooks');
+  const checkout = store.upsertProject('checkout-api', 'Checkout API');
+  const cart = store.upsertProject('cart-ui', 'Cart / checkout UI');
 
-  // ---- Decision ----
-  const decision = store.upsertDecision(
-    'drop-redis-ratelimit',
-    'Drop the Redis-backed rate limiter in favor of an in-process token bucket',
+  // ---- Decisions ----
+  const pgbouncer = store.upsertDecision(
+    'adopt-pgbouncer',
+    'Adopt PgBouncer connection pooling for the checkout service',
+  );
+  const optimisticCart = store.upsertDecision(
+    'optimistic-cart',
+    'Ship optimistic cart updates with a rollback toast + retry',
   );
 
-  const ch = { channel: '#backend', channelId: 'C_BACKEND' };
+  const backend = { channel: '#backend' };
+  const frontend = { channel: '#frontend' };
 
-  // ---- Involvement: rate-limiting ----
-  // Dana: formally assigned, but only a stale kickoff message long ago → low + old.
-  store.addInvolvement(dana.id, rl.id, 1, daysAgo(140), {
-    ...ch,
-    ts: daysAgo(140),
-    excerpt: "I'll own rate-limiting for this quarter.",
+  // ---- #backend / checkout-api ----
+  // Adam: formally assigned, one stale kickoff long ago → low + old.
+  store.addInvolvement(adam.id, checkout.id, 1, daysAgo(120), {
+    ...backend,
+    ts: daysAgo(120),
+    excerpt: 'I own the checkout service this quarter.',
   });
-
-  // Mia: repeatedly debugged + posted the actual fix, recently → high + recent.
-  store.addInvolvement(mia.id, rl.id, 5, daysAgo(9), {
-    ...ch,
-    ts: daysAgo(12),
-    excerpt: 'Traced the 429 storms to Redis round-trips under burst load.',
-  });
-  store.addInvolvement(mia.id, rl.id, 5, daysAgo(7), {
-    ...ch,
+  // Sam: relays the customer signal → low weight.
+  store.addInvolvement(sam.id, checkout.id, 1, daysAgo(7), {
+    ...backend,
     ts: daysAgo(7),
-    excerpt: 'Shipped the in-process token bucket; p99 dropped from 180ms to 22ms.',
+    excerpt: 'Wave of tickets — customers say checkout times out at peak hours.',
   });
-  store.addInvolvement(mia.id, rl.id, 3, daysAgo(2), {
-    ...ch,
-    ts: daysAgo(2),
-    excerpt: 'Answered the on-call thread about tuning the burst size.',
+  // Ivan: reproduced, root-caused, shipped the fix, recently → the real expert.
+  store.addInvolvement(ivan.id, checkout.id, 4, daysAgo(6), {
+    ...backend,
+    ts: daysAgo(6),
+    excerpt: 'Reproduced it — the API stalls when the Postgres connection pool is exhausted.',
+  });
+  store.addInvolvement(ivan.id, checkout.id, 5, daysAgo(4), {
+    ...backend,
+    ts: daysAgo(4),
+    excerpt: 'Shipped PgBouncer connection pooling; checkout p95 dropped 9s → 700ms.',
   });
 
-  // Leo: reviewed and merged the fix → solid runner-up.
-  store.addInvolvement(leo.id, rl.id, 3, daysAgo(7), {
-    ...ch,
-    ts: daysAgo(7),
-    excerpt: 'Reviewed and merged the token-bucket PR; suggested the jitter window.',
+  // ---- #frontend / cart-ui ----
+  // Adam: owns the frontend on paper, stale → low + old.
+  store.addInvolvement(adam.id, cart.id, 1, daysAgo(150), {
+    ...frontend,
+    ts: daysAgo(150),
+    excerpt: "I own the frontend on paper but haven't touched it in months.",
   });
-
-  // Some unrelated involvement so ranking has to actually discriminate.
-  store.addInvolvement(dana.id, billing.id, 4, daysAgo(20), {
-    ...ch,
-    ts: daysAgo(20),
-    excerpt: 'Rebuilt the Stripe webhook retry logic.',
+  // Rahul: rewrote the cart flow + fixed the stepper, recently → frontend expert.
+  store.addInvolvement(rahul.id, cart.id, 5, daysAgo(5), {
+    ...frontend,
+    ts: daysAgo(5),
+    excerpt: 'Rewrote add-to-cart to update optimistically; the UI freeze is gone.',
+  });
+  store.addInvolvement(rahul.id, cart.id, 3, daysAgo(3), {
+    ...frontend,
+    ts: daysAgo(3),
+    excerpt: 'Fixed the quantity stepper that fired a request per click.',
   });
 
   // ---- Decision provenance ----
-  store.addEdge('RAISED_CONCERN', sam.id, decision.id, daysAgo(11), {
-    ...ch,
-    ts: daysAgo(11),
-    excerpt: 'Worried in-process limits drift across pods without shared state.',
+  // PgBouncer: Adam pushed back, Ivan made the call.
+  store.addEdge('RAISED_CONCERN', adam.id, pgbouncer.id, daysAgo(5), {
+    ...backend,
+    ts: daysAgo(5),
+    excerpt: 'Concern: PgBouncer is one more thing to run and monitor.',
   });
-  store.addEdge('RAISED_CONCERN', leo.id, decision.id, daysAgo(10), {
-    ...ch,
-    ts: daysAgo(10),
-    excerpt: 'Asked how we handle a pod restart losing its bucket counts.',
+  store.addEdge('MADE_CALL', ivan.id, pgbouncer.id, daysAgo(4), {
+    ...backend,
+    ts: daysAgo(4),
+    excerpt: 'Final call: keep PgBouncer — pool exhaustion was the real outage cause; adding monitoring.',
   });
-  store.addEdge('MADE_CALL', mia.id, decision.id, daysAgo(8), {
-    ...ch,
-    ts: daysAgo(8),
-    excerpt:
-      'Decided per-pod buckets are fine: limits are advisory and Redis latency was the real outage cause.',
+  store.addEdge('RELATES_TO', pgbouncer.id, checkout.id, daysAgo(4));
+
+  // Optimistic cart: Adam pushed back, Rahul made the call.
+  store.addEdge('RAISED_CONCERN', adam.id, optimisticCart.id, daysAgo(4), {
+    ...frontend,
+    ts: daysAgo(4),
+    excerpt: 'Concern: optimistic updates could show a wrong item count if a reconcile silently fails.',
   });
-  store.addEdge('RELATES_TO', decision.id, rl.id, daysAgo(8));
+  store.addEdge('MADE_CALL', rahul.id, optimisticCart.id, daysAgo(3), {
+    ...frontend,
+    ts: daysAgo(3),
+    excerpt: 'Final call: ship optimistic updates with a rollback toast + retry on failure.',
+  });
+  store.addEdge('RELATES_TO', optimisticCart.id, cart.id, daysAgo(3));
 
   store.save();
   const snap = store.snapshot();
-  console.log(
-    `Seeded graph: ${snap.nodes.length} nodes, ${snap.edges.length} edges → ${''}`,
-  );
+  console.error(`Seeded graph: ${snap.nodes.length} nodes, ${snap.edges.length} edges`);
 }
 
 if (require.main === module) {
