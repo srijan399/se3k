@@ -41,12 +41,6 @@ SE3K continuously reads the channels it's invited to and distills them into a sm
 - **Nodes:** `Person`, `Project`, `Decision` (+ `Channel` for citations)
 - **Edges:** `INVOLVED_IN` (the star of the show), `RAISED_CONCERN`, `MADE_CALL`, `RELATES_TO`
 
-The entire idea of "who _actually_ knows this" lives in one weighted, time-stamped edge:
-
-$$
-\text{Person} \xrightarrow[\;(w,\; t_{\text{last}})\;]{\textbf{INVOLVED\_IN}} \text{Project}
-$$
-
 An LLM extraction pass turns raw messages into these edges and — crucially — assigns each contribution a **weight** by _what the person actually did_, not how loudly they typed:
 
 $$
