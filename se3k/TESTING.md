@@ -4,7 +4,9 @@ A ~15-minute end-to-end test in your Slack sandbox, set in **your tech workplace
 (`#backend` and `#frontend`). It proves both core behaviors — **expertise
 routing** (who really knows X) and **decision provenance** (why we decided X) —
 and shows SE3K discriminating *per area*: the backend expert and the frontend
-expert are different people, and **neither is the formal "owner."**
+expert are different people, and **neither is the formal "owner."** It also covers
+two bonus query types — **person status** ("what is X working on?", §7) and a
+**team overview** ("who's doing what?", §8).
 
 ## Cast (your workspace)
 
@@ -131,7 +133,30 @@ and dissent, not just "we added PgBouncer."
 **Expected:** **Adam's** concern (a silent reconcile failure could show a wrong
 item count) + **Rahul's** final call (ship with a rollback toast + retry).
 
-## 7. Honest "I don't know"
+## 7. Person status — "what is X working on?"
+
+```
+@se3k what is @Rahul Sharma working on?
+/ask-graph what's Ivan working on?
+```
+
+**Expected:** a summary about **that person only** — Rahul → the cart UI work
+(optimistic add-to-cart, stepper fix, shipped it); Ivan → the Checkout API /
+PgBouncer fix. It must **not** drag in other people. (Great counter-demo: it used
+to answer with the whole team — now it's person-scoped.)
+
+## 8. Team overview — "who's doing what?"
+
+```
+/ask-graph give me an update of who is doing what
+@se3k what's everyone working on?
+```
+
+**Expected:** a skimmable per-project digest — **Checkout API → Ivan** (+ Sam),
+**Cart UI → Rahul** (+ Adam) — one line each, sourced. The "team status in one
+question" moment.
+
+## 9. Honest "I don't know"
 
 ```
 /ask-graph who owns the mobile app?
@@ -140,7 +165,7 @@ item count) + **Rahul's** final call (ship with a rollback toast + retry).
 **Expected:** SE3K says it has no signal / lists known topics, instead of
 inventing a name.
 
-## 8. Proof — click the source
+## 10. Proof — click the source
 
 Every answer ends with a **Sources** list, and each item is a **clickable link
 straight to the exact Slack message** it drew from. Click one during the demo to
@@ -148,14 +173,14 @@ jump to Ivan's "shipped a fix… 9s → 700ms" message — that's the "trust, bu
 verify" moment. (Links render live from Slack; the local `pnpm ask` tester prints
 the raw `<url|text>` form.)
 
-## 9. Big-thread / context safety (optional)
+## 11. Big-thread / context safety (optional)
 
 Paste a long back-and-forth (30–100 lines) into a channel and `/se3k-ingest`.
 Terminal 2 shows `extractGraph: N chunks` — the thread was split into several
 small LLM calls instead of one huge prompt, then merged. The graph still updates
 correctly, no context-limit errors.
 
-## 10. Dashboard
+## 12. Dashboard
 
 Open **http://localhost:3000**:
 - Node size ≈ involvement — **Ivan** dominates checkout-backend, **Rahul** the cart.

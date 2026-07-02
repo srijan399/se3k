@@ -1,182 +1,248 @@
 {
   "nodes": [
     {
-      "id": "person:U_DANA",
+      "id": "person:adam-reyes",
       "type": "Person",
-      "label": "Dana Okafor",
-      "slackUserId": "U_DANA"
+      "label": "Adam Reyes",
+      "slackUserId": "U0BDR6CT8F3"
     },
     {
-      "id": "person:U_MIA",
+      "id": "person:ivan-sanders",
       "type": "Person",
-      "label": "Mia Chen",
-      "slackUserId": "U_MIA"
+      "label": "Ivan Sanders",
+      "slackUserId": "U0BDH33M603"
     },
     {
-      "id": "person:U_LEO",
+      "id": "person:rahul-sharma",
       "type": "Person",
-      "label": "Leo Martins",
-      "slackUserId": "U_LEO"
+      "label": "Rahul Sharma",
+      "slackUserId": "U0BEB434W76"
     },
     {
-      "id": "person:U_SAM",
+      "id": "person:sam-okafor",
       "type": "Person",
-      "label": "Sam Reyes",
-      "slackUserId": "U_SAM"
+      "label": "Sam Okafor",
+      "slackUserId": "U0BDM87P0HL"
     },
     {
-      "id": "project:rate-limiting",
+      "id": "project:checkout-api",
       "type": "Project",
-      "label": "API gateway rate limiting"
+      "label": "Checkout API"
     },
     {
-      "id": "project:billing-webhooks",
+      "id": "project:cart-ui",
       "type": "Project",
-      "label": "Billing webhooks"
+      "label": "Cart / checkout UI"
     },
     {
-      "id": "decision:drop-redis-ratelimit",
+      "id": "decision:adopt-pgbouncer",
       "type": "Decision",
-      "label": "Drop the Redis-backed rate limiter in favor of an in-process token bucket",
+      "label": "Adopt PgBouncer connection pooling for the checkout service",
       "meta": {
-        "summary": "Drop the Redis-backed rate limiter in favor of an in-process token bucket"
+        "summary": "Adopt PgBouncer connection pooling for the checkout service"
       }
+    },
+    {
+      "id": "decision:optimistic-cart",
+      "type": "Decision",
+      "label": "Ship optimistic cart updates with a rollback toast + retry",
+      "meta": {
+        "summary": "Ship optimistic cart updates with a rollback toast + retry"
+      }
+    },
+    {
+      "id": "person:U0BDT3PHBK6",
+      "type": "Person",
+      "label": "Ultrode",
+      "slackUserId": "U0BDT3PHBK6"
+    },
+    {
+      "id": "project:delivery-logistics-connections",
+      "type": "Project",
+      "label": "Delivery Logistics Connections"
     }
   ],
   "edges": [
     {
-      "id": "INVOLVED_IN:person:U_DANA->project:rate-limiting",
+      "id": "INVOLVED_IN:person:adam-reyes->project:checkout-api",
       "type": "INVOLVED_IN",
-      "from": "person:U_DANA",
-      "to": "project:rate-limiting",
+      "from": "person:adam-reyes",
+      "to": "project:checkout-api",
       "weight": 1,
-      "last_active": "2026-02-10T13:27:53.045Z",
+      "last_active": "2026-03-04T09:57:20.967Z",
       "sources": [
         {
           "channel": "#backend",
-          "channelId": "C_BACKEND",
-          "ts": "2026-02-10T13:27:53.045Z",
-          "excerpt": "I'll own rate-limiting for this quarter."
+          "ts": "2026-03-04T09:57:20.968Z",
+          "excerpt": "I own the checkout service this quarter."
         }
       ]
     },
     {
-      "id": "INVOLVED_IN:person:U_MIA->project:rate-limiting",
+      "id": "INVOLVED_IN:person:sam-okafor->project:checkout-api",
       "type": "INVOLVED_IN",
-      "from": "person:U_MIA",
-      "to": "project:rate-limiting",
-      "weight": 13,
-      "last_active": "2026-06-28T13:27:53.045Z",
+      "from": "person:sam-okafor",
+      "to": "project:checkout-api",
+      "weight": 1,
+      "last_active": "2026-06-25T09:57:20.968Z",
       "sources": [
         {
           "channel": "#backend",
-          "channelId": "C_BACKEND",
-          "ts": "2026-06-18T13:27:53.045Z",
-          "excerpt": "Traced the 429 storms to Redis round-trips under burst load."
+          "ts": "2026-06-25T09:57:20.968Z",
+          "excerpt": "Wave of tickets — customers say checkout times out at peak hours."
+        }
+      ]
+    },
+    {
+      "id": "INVOLVED_IN:person:ivan-sanders->project:checkout-api",
+      "type": "INVOLVED_IN",
+      "from": "person:ivan-sanders",
+      "to": "project:checkout-api",
+      "weight": 9,
+      "last_active": "2026-06-28T09:57:20.968Z",
+      "sources": [
+        {
+          "channel": "#backend",
+          "ts": "2026-06-26T09:57:20.968Z",
+          "excerpt": "Reproduced it — the API stalls when the Postgres connection pool is exhausted."
         },
         {
           "channel": "#backend",
-          "channelId": "C_BACKEND",
-          "ts": "2026-06-23T13:27:53.045Z",
-          "excerpt": "Shipped the in-process token bucket; p99 dropped from 180ms to 22ms."
+          "ts": "2026-06-28T09:57:20.968Z",
+          "excerpt": "Shipped PgBouncer connection pooling; checkout p95 dropped 9s → 700ms."
+        }
+      ]
+    },
+    {
+      "id": "INVOLVED_IN:person:adam-reyes->project:cart-ui",
+      "type": "INVOLVED_IN",
+      "from": "person:adam-reyes",
+      "to": "project:cart-ui",
+      "weight": 1,
+      "last_active": "2026-02-02T09:57:20.968Z",
+      "sources": [
+        {
+          "channel": "#frontend",
+          "ts": "2026-02-02T09:57:20.968Z",
+          "excerpt": "I own the frontend on paper but haven't touched it in months."
+        }
+      ]
+    },
+    {
+      "id": "INVOLVED_IN:person:rahul-sharma->project:cart-ui",
+      "type": "INVOLVED_IN",
+      "from": "person:rahul-sharma",
+      "to": "project:cart-ui",
+      "weight": 8,
+      "last_active": "2026-06-29T09:57:20.968Z",
+      "sources": [
+        {
+          "channel": "#frontend",
+          "ts": "2026-06-27T09:57:20.968Z",
+          "excerpt": "Rewrote add-to-cart to update optimistically; the UI freeze is gone."
         },
         {
-          "channel": "#backend",
-          "channelId": "C_BACKEND",
-          "ts": "2026-06-28T13:27:53.045Z",
-          "excerpt": "Answered the on-call thread about tuning the burst size."
+          "channel": "#frontend",
+          "ts": "2026-06-29T09:57:20.968Z",
+          "excerpt": "Fixed the quantity stepper that fired a request per click."
         }
       ]
     },
     {
-      "id": "INVOLVED_IN:person:U_LEO->project:rate-limiting",
-      "type": "INVOLVED_IN",
-      "from": "person:U_LEO",
-      "to": "project:rate-limiting",
-      "weight": 3,
-      "last_active": "2026-06-23T13:27:53.045Z",
-      "sources": [
-        {
-          "channel": "#backend",
-          "channelId": "C_BACKEND",
-          "ts": "2026-06-23T13:27:53.045Z",
-          "excerpt": "Reviewed and merged the token-bucket PR; suggested the jitter window."
-        }
-      ]
-    },
-    {
-      "id": "INVOLVED_IN:person:U_DANA->project:billing-webhooks",
-      "type": "INVOLVED_IN",
-      "from": "person:U_DANA",
-      "to": "project:billing-webhooks",
-      "weight": 4,
-      "last_active": "2026-06-10T13:27:53.045Z",
-      "sources": [
-        {
-          "channel": "#backend",
-          "channelId": "C_BACKEND",
-          "ts": "2026-06-10T13:27:53.045Z",
-          "excerpt": "Rebuilt the Stripe webhook retry logic."
-        }
-      ]
-    },
-    {
-      "id": "RAISED_CONCERN:person:U_SAM->decision:drop-redis-ratelimit",
+      "id": "RAISED_CONCERN:person:adam-reyes->decision:adopt-pgbouncer",
       "type": "RAISED_CONCERN",
-      "from": "person:U_SAM",
-      "to": "decision:drop-redis-ratelimit",
+      "from": "person:adam-reyes",
+      "to": "decision:adopt-pgbouncer",
       "weight": 1,
-      "last_active": "2026-06-19T13:27:53.045Z",
+      "last_active": "2026-06-27T09:57:20.968Z",
       "sources": [
         {
           "channel": "#backend",
-          "channelId": "C_BACKEND",
-          "ts": "2026-06-19T13:27:53.045Z",
-          "excerpt": "Worried in-process limits drift across pods without shared state."
+          "ts": "2026-06-27T09:57:20.968Z",
+          "excerpt": "Concern: PgBouncer is one more thing to run and monitor."
         }
       ]
     },
     {
-      "id": "RAISED_CONCERN:person:U_LEO->decision:drop-redis-ratelimit",
-      "type": "RAISED_CONCERN",
-      "from": "person:U_LEO",
-      "to": "decision:drop-redis-ratelimit",
-      "weight": 1,
-      "last_active": "2026-06-20T13:27:53.045Z",
-      "sources": [
-        {
-          "channel": "#backend",
-          "channelId": "C_BACKEND",
-          "ts": "2026-06-20T13:27:53.045Z",
-          "excerpt": "Asked how we handle a pod restart losing its bucket counts."
-        }
-      ]
-    },
-    {
-      "id": "MADE_CALL:person:U_MIA->decision:drop-redis-ratelimit",
+      "id": "MADE_CALL:person:ivan-sanders->decision:adopt-pgbouncer",
       "type": "MADE_CALL",
-      "from": "person:U_MIA",
-      "to": "decision:drop-redis-ratelimit",
+      "from": "person:ivan-sanders",
+      "to": "decision:adopt-pgbouncer",
       "weight": 1,
-      "last_active": "2026-06-22T13:27:53.045Z",
+      "last_active": "2026-06-28T09:57:20.968Z",
       "sources": [
         {
           "channel": "#backend",
-          "channelId": "C_BACKEND",
-          "ts": "2026-06-22T13:27:53.045Z",
-          "excerpt": "Decided per-pod buckets are fine: limits are advisory and Redis latency was the real outage cause."
+          "ts": "2026-06-28T09:57:20.968Z",
+          "excerpt": "Final call: keep PgBouncer — pool exhaustion was the real outage cause; adding monitoring."
         }
       ]
     },
     {
-      "id": "RELATES_TO:decision:drop-redis-ratelimit->project:rate-limiting",
+      "id": "RELATES_TO:decision:adopt-pgbouncer->project:checkout-api",
       "type": "RELATES_TO",
-      "from": "decision:drop-redis-ratelimit",
-      "to": "project:rate-limiting",
+      "from": "decision:adopt-pgbouncer",
+      "to": "project:checkout-api",
       "weight": 1,
-      "last_active": "2026-06-22T13:27:53.045Z",
+      "last_active": "2026-06-28T09:57:20.968Z",
       "sources": []
+    },
+    {
+      "id": "RAISED_CONCERN:person:adam-reyes->decision:optimistic-cart",
+      "type": "RAISED_CONCERN",
+      "from": "person:adam-reyes",
+      "to": "decision:optimistic-cart",
+      "weight": 1,
+      "last_active": "2026-06-28T09:57:20.968Z",
+      "sources": [
+        {
+          "channel": "#frontend",
+          "ts": "2026-06-28T09:57:20.968Z",
+          "excerpt": "Concern: optimistic updates could show a wrong item count if a reconcile silently fails."
+        }
+      ]
+    },
+    {
+      "id": "MADE_CALL:person:rahul-sharma->decision:optimistic-cart",
+      "type": "MADE_CALL",
+      "from": "person:rahul-sharma",
+      "to": "decision:optimistic-cart",
+      "weight": 1,
+      "last_active": "2026-06-29T09:57:20.968Z",
+      "sources": [
+        {
+          "channel": "#frontend",
+          "ts": "2026-06-29T09:57:20.968Z",
+          "excerpt": "Final call: ship optimistic updates with a rollback toast + retry on failure."
+        }
+      ]
+    },
+    {
+      "id": "RELATES_TO:decision:optimistic-cart->project:cart-ui",
+      "type": "RELATES_TO",
+      "from": "decision:optimistic-cart",
+      "to": "project:cart-ui",
+      "weight": 1,
+      "last_active": "2026-06-29T09:57:20.968Z",
+      "sources": []
+    },
+    {
+      "id": "INVOLVED_IN:person:U0BDT3PHBK6->project:delivery-logistics-connections",
+      "type": "INVOLVED_IN",
+      "from": "person:U0BDT3PHBK6",
+      "to": "project:delivery-logistics-connections",
+      "weight": 1,
+      "last_active": "1782984077.399459",
+      "sources": [
+        {
+          "channel": "#general",
+          "channelId": "C0BDPAW0XD0",
+          "ts": "1782984077.399459",
+          "permalink": "https://e0bdt0963v2-3hce90x3.slack.com/archives/C0BDPAW0XD0/p1782984077399459",
+          "excerpt": "I'll be picking up the delivery logistic connections"
+        }
+      ]
     }
   ],
-  "updatedAt": "2026-06-30T13:27:53.045Z"
+  "updatedAt": "2026-07-02T10:02:57.799Z"
 }
