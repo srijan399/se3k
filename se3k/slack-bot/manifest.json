@@ -20,6 +20,12 @@
         "command": "/se3k-ingest",
         "description": "Flush pending channel messages into the knowledge graph",
         "should_escape": false
+      },
+      {
+        "command": "/se3k-backfill",
+        "description": "Ingest recent channel history into the knowledge graph",
+        "usage_hint": "[count]",
+        "should_escape": false
       }
     ]
   },
@@ -38,7 +44,12 @@
   },
   "settings": {
     "event_subscriptions": {
-      "bot_events": ["app_mention", "message.channels", "message.groups"]
+      "bot_events": [
+        "app_mention",
+        "message.channels",
+        "message.groups",
+        "member_joined_channel"
+      ]
     },
     "interactivity": {
       "is_enabled": true

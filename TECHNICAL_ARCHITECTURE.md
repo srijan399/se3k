@@ -6,6 +6,163 @@ This document complements `se3k-plan.md`. The plan tells you _what_ to build and
 
 ---
 
+## 0. Architecture at a glance (submission diagram)
+
+Render to PNG/SVG at **[mermaid.live](https://mermaid.live)** (paste → Export at 2–3× scale),
+or with the CLI: `npx -y @mermaid-js/mermaid-cli -i TECHNICAL_ARCHITECTURE.md -o se3k-arch.png`.
+Six boxes, one loop: solid arrows = **ingest** (1–4), dashed arrows = **ask** (A–D).
+
+```mermaid
+%%{init: {'theme':'base','themeVariables':{'fontSize':'22px','fontFamily':'Inter, Helvetica, sans-serif','lineColor':'#555'}, 'flowchart':{'nodeSpacing':55,'rankSpacing':90,'curve':'basis','htmlLabels':true}}}%%
+flowchart LR
+  SLACK["<b>Slack Workspace</b><br/><br/>messages in channels<br/>/ask-graph &nbsp;·&nbsp; @se3k<br/><i>developer sandbox</i>"]
+
+  BOT["<b>slack-bot</b><br/>Bolt.js · Socket Mode<br/><br/>• event listener + buffer<br/>• slash / mention handlers<br/>• <b>MCP stdio client</b>"]
+
+  MCP["<b>mcp-server — THE BRAIN</b><br/>MCP server over stdio<br/><br/>• tools: ingest_messages, ask_graph<br/>• extract.ts &nbsp;→&nbsp; answer.ts<br/>• store.ts — weighted ranking"]
+
+  LLM["<b>Groq LLM</b><br/>llama-3.1<br/>OpenAI-compatible"]
+
+  GRAPH[("<b>graph.json</b> — source of truth<br/><br/>Person · Project · Decision<br/><b>INVOLVED_IN</b> (weight, last_active)<br/>RAISED_CONCERN · MADE_CALL")]
+
+  WEB["<b>Next.js dashboard</b><br/><br/>/api/graph<br/>live force-graph"]
+
+  SLACK == "1 · new message" ==> BOT
+  BOT   == "2 · ingest_messages" ==> MCP
+  MCP   == "3 · extract / phrase" ==> LLM
+  MCP   == "4 · persist &amp; query" ==> GRAPH
+
+  SLACK -. "A · question" .-> BOT
+  BOT   -. "B · ask_graph" .-> MCP
+  MCP   -. "C · answer + citations" .-> BOT
+  BOT   -. "D · reply in thread" .-> SLACK
+
+  GRAPH == "live snapshot (poll)" ==> WEB
+
+  classDef cSlack fill:#4A154B,color:#fff,stroke:#000,stroke-width:2px;
+  classDef cBot fill:#36C5F0,color:#04222e,stroke:#04222e,stroke-width:2px;
+  classDef cMcp fill:#ECB22E,color:#3a2a00,stroke:#3a2a00,stroke-width:3px;
+  classDef cGraph fill:#2EB67D,color:#00291b,stroke:#00291b,stroke-width:2px;
+  classDef cWeb fill:#111,color:#fff,stroke:#000,stroke-width:2px;
+  classDef cLlm fill:#f3f3f3,color:#111,stroke:#888,stroke-width:2px;
+
+  class SLACK cSlack
+  class BOT cBot
+  class MCP cMcp
+  class LLM cLlm
+  class GRAPH cGraph
+  class WEB cWeb
+```
+
+> **Reads in one breath:** Slack → bot → the MCP brain, which extracts with the LLM and
+> writes the weighted graph; a question runs the same path in reverse and comes back
+> **sourced**; the dashboard reads the same graph live.
+
+### The two core behaviors (sequence view)
+
+**Ingestion — messages become a weighted graph** (automatic: backfill on join + debounced flush)
+```mermaid
+sequenceDiagram
+  autonumber
+  participant S as Slack
+  participant B as slack-bot (Bolt)
+  participant M as mcp-server (ingest_messages)
+  participant L as Groq LLM
+  participant G as graph.json
+
+  S->>B: message event / channel history (conversations.history)
+  B->>B: resolve names, buffer per channel, flush on size or ~20s idle
+  B->>M: MCP call ingest_messages(tagged text, refs)
+  M->>M: chunk large blobs (bounded per-call context)
+  M->>L: extraction prompt (weight rubric + example)
+  L-->>M: {people, projects, decisions, involvement, edges} JSON
+  M->>G: entity-resolve + accumulate INVOLVED_IN (weight, last_active, permalink)
+  Note over G: fix/review = weight 4–5,<br/>mention = 1, assigned-but-idle = 1
+```
+
+**Query — expertise routing & decision provenance**
+```mermaid
+sequenceDiagram
+  autonumber
+  participant U as User in Slack
+  participant B as slack-bot
+  participant M as mcp-server (ask_graph)
+  participant G as graph.json
+  participant L as Groq LLM
+
+  participant C as Semantic cache (Jina)
+  U->>B: /ask-graph who knows about the checkout timeouts?
+  B->>M: MCP call ask_graph(question)
+  M->>C: embed question, look up at current graph version
+  alt semantically-similar hit
+    C-->>M: cached answer — ZERO LLM calls
+  else miss
+    M->>L: route to ONE node via compact label-only catalog
+    M->>G: resolve subgraph (deterministic, in code)
+    G-->>M: ranked experts by score(p) = W·(0.4+0.6·recency)
+    M->>L: phrase ONLY these grounded facts
+    L-->>M: natural-language answer
+    M->>C: store answer under the graph version
+  end
+  M-->>B: answer + source permalinks
+  B-->>U: reply in-channel / in-thread (never uncited)
+```
+
+### The ranking that makes it work (the differentiator)
+
+```
+score(person) = W · (0.4 + 0.6 · recency)
+
+  W        = Σ weight of every contribution to the project   (fix/review ≫ mention)
+  recency  = (1/2) ^ (Δt / 30 days)        Δt = time since last activity
+
+⇒ deep past work never disappears (0.4 floor), but recent hands-on
+  involvement wins ties. The demonstrated expert outranks the assignee.
+```
+
+### ASCII fallback (if a renderer isn't available)
+
+```
+                       ┌──────────────────────────────────────────┐
+                       │        SLACK WORKSPACE (sandbox)          │
+                       │  msgs • /ask-graph • /se3k-ingest • @se3k │
+                       └───────┬───────────────────────▲──────────┘
+              message event    │                       │  sourced answer
+                               ▼                       │
+                       ┌──────────────────────────────────────────┐
+                       │   slack-bot  (Bolt.js, Socket Mode)       │
+                       │  event listener • buffer • cmd handlers   │
+                       │            └── MCP stdio client ──┐       │
+                       └──────────────────────────────────┼───────┘
+                       ingest_messages / ask_graph (MCP)  │
+                                                          ▼
+   ┌───────┐  extraction   ┌───────────────────────────────────────────┐
+   │ Groq  │◀──prompt──────│         mcp-server  (THE BRAIN)           │
+   │ LLM   │──JSON────────▶│  ingest_messages   ask_graph              │
+   │(llama)│   phrase ▲    │  extract.ts        answer.ts              │
+   └───────┘   facts  └────│  ───────────────  store.ts (graph+rank)   │
+                           └───────────────┬───────────────▲──────────┘
+                             persist/read  │               │ read subgraph
+                                           ▼               │
+                       ┌──────────────────────────────────────────┐
+                       │     graph-store/graph.json  (truth)       │
+                       │  Person·Project·Decision  +  weighted      │
+                       │  INVOLVED_IN(weight,last_active), etc.     │
+                       └───────────────┬──────────────────────────┘
+                          JSON snapshot│
+                                       ▼
+                       ┌──────────────────────────────────────────┐
+                       │   web  (Next.js) — /api/graph → GraphView │
+                       │   live force-graph, colored by node type  │
+                       └──────────────────────────────────────────┘
+```
+
+**Required-tech mapping for judges:** MCP server integration = the brain & the bot↔brain link ·
+Slack AI capabilities = the `/ask-graph` agent · history backfill = `conversations.history`
+pulled automatically on channel join.
+
+---
+
 ## 1. System Architecture
 
 This is the full picture: how data flows from a Slack message into a graph, and back out as an answer.
@@ -74,6 +231,8 @@ flowchart TB
 ```
 
 **Key design point to keep visible in your head:** the `INVOLVED_IN` edge is the only place "expertise routing" actually lives. Everything else is plumbing to get data into that edge and query it back out. If you're ever unsure what to build next, ask "does this get me closer to a correct, well-weighted `INVOLVED_IN` edge, or to querying it well?"
+
+> **Implementation notes (current build).** Ingestion is now **automatic**: the bot backfills recent history via `conversations.history` when it joins a channel, then buffers new messages and flushes them on a short inactivity timer (or batch size) — no manual trigger. Slack user IDs are resolved to display names (`users.info`) before extraction, messages are de-duped by timestamp, and the `EX` extraction step **chunks** large blobs into bounded per-call prompts (merging results) so a 100-message thread never becomes one giant LLM call. On the query side, `QR` first routes a question to one graph node using a **compact label-only catalog** (cheap + robust), then `AN` runs the deterministic ranking/provenance and phrases the grounded facts with citations. A **semantic answer cache** sits in front of this: `ask_graph` embeds the question (Jina) and returns a previously-computed answer for a semantically-similar question at the same graph version — **zero LLM calls** — invalidated automatically whenever the graph changes. Everything degrades to keyword matching + the seeded graph when no LLM key is set, and the cache is a no-op without `JINA_API_KEY`.
 
 ---
 

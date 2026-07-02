@@ -1,0 +1,95 @@
+========================================================================
+SE3K — DEMO CONVERSATIONS
+========================================================================
+Post these in your Slack sandbox as the named people, then ask SE3K the
+questions in TESTING.md. They're deliberately human (jokes, tangents, real
+problems) — SE3K ignores the chit-chat and still extracts the real story:
+
+  #backend  → the person who ACTUALLY fixed the checkout outage is IVAN,
+              not Adam (the busy "owner"). Decision: adopt PgBouncer.
+  #frontend → the person who ACTUALLY fixed the cart is RAHUL, not Adam
+              (the on-paper "owner"). Decision: ship optimistic cart updates.
+
+Channel rosters:
+  #backend  = Ivan Sanders, Sam Okafor, Adam Reyes
+  #frontend = Adam Reyes, Rahul Sharma
+
+Tip: paste a handful at a time as each user; SE3K auto-ingests (~20s), or
+run /se3k-ingest to flush immediately.
+
+
+========================================================================
+#backend  —  "checkout keeps dying at lunch"
+========================================================================
+
+Sam Okafor:    morning all ☕ my inbox is on fire, ~40 tickets came in overnight
+Sam Okafor:    customers say checkout just spins forever at peak and then times out
+Adam Reyes:    ugh, classic. I "own" checkout on paper but I'm buried in board-deck hell this week
+Adam Reyes:    Ivan can you take a look? you're basically our human debugger at this point
+Ivan Sanders:  on it — coffee first though, I refuse to debug uncaffeinated
+Sam Okafor:    bless. I'll keep the customers from rioting in the meantime
+Ivan Sanders:  ok reproduced it — hammered staging with load and checkout falls over around ~100 concurrent users
+Ivan Sanders:  watching the DB and the connections are completely maxed. we open a fresh Postgres connection per request 🙃
+Sam Okafor:    is that bad? (asking for a non-engineer friend. the friend is me)
+Ivan Sanders:  it's like everyone bringing their own chair to a meeting instead of using the ones already in the room — we run out
+Adam Reyes:    lol. so pool exhaustion basically?
+Ivan Sanders:  yep. it's always the connection pool. the DNS of backend bugs
+Sam Okafor:    heads up, BigCo just escalated — their checkout was down ~6 min at lunch peak
+Ivan Sanders:  that tracks. lunch peak = max concurrency = pool empty = everything waits
+Adam Reyes:    ok this is real revenue now. what's the fix
+Ivan Sanders:  put a connection pooler in front — PgBouncer — so we reuse connections instead of one-per-request
+Ivan Sanders:  spinning it up on staging now, brb
+Adam Reyes:    concern: that's one more piece of infra to run and monitor. we're tiny, I don't love more moving parts
+Ivan Sanders:  fair, but the alternative is checkout dying every lunch. I'll wire up alerts so it's not a black box
+Sam Okafor:    for what it's worth I vote strongly for "checkout stops dying"
+Ivan Sanders:  😄 deploying to staging…
+Ivan Sanders:  results are in: checkout p95 went from 9s to 700ms under the exact same load. night and day
+Sam Okafor:    🎉 700ms I can sell to customers. 9 seconds I cannot
+Adam Reyes:    ok that's a massive win, ship it
+Ivan Sanders:  final call then — we keep PgBouncer. I'll add pool + latency dashboards and a pager alert. pool exhaustion was the real outage cause
+Adam Reyes:    👍 approved. thank you for saving my quarter genuinely
+Ivan Sanders:  shipped to prod 🚀 watching the graphs now
+Sam Okafor:    tickets are already slowing down, you're a wizard
+Ivan Sanders:  it's just chairs in a room Sam 🪑
+Adam Reyes:    someone please put "it's always the connection pool" on a mug
+Sam Okafor:    adding it to the merch backlog right after I close these 40 tickets
+Ivan Sanders:  monitoring's green, p95 holding at ~700ms through peak. calling it. going for more coffee ☕
+
+
+========================================================================
+#frontend  —  "the cart runs on a potato"
+========================================================================
+
+Adam Reyes:    Rahul, real talk, our cart page feels like it's running on a potato
+Adam Reyes:    I'm technically the frontend "owner" but I haven't opened that code since like March
+Rahul Sharma:  haha yeah the cart is currently held together with hope and z-index
+Adam Reyes:    users are bouncing right at the cart step, we're leaking conversions
+Rahul Sharma:  lemme dig in. is it the classic "add to cart, wait a full second, question your life choices" flow?
+Adam Reyes:    that is EXACTLY it
+Rahul Sharma:  found it — every time you add an item it re-fetches the entire basket from the server before touching the UI
+Rahul Sharma:  so the whole page just freezes for about a second while it waits. absolutely brutal on mobile
+Adam Reyes:    oof, why did we build it that way
+Rahul Sharma:  past us thought "always trust the server", very noble, also terrible UX
+Rahul Sharma:  gonna make it optimistic — update the UI instantly, reconcile with the server in the background
+Adam Reyes:    ok concern though: if the server call quietly fails, won't the cart show the wrong item count? feels risky right before checkout
+Rahul Sharma:  valid. I'll add a rollback — if the reconcile fails we revert the count and pop a little "hmm, try again" toast
+Adam Reyes:    ok I can live with that
+Rahul Sharma:  also lol the quantity stepper fires a network request on EVERY click — tap +5 fast and we basically DDoS ourselves
+Adam Reyes:    we invented our own load test, incredible work team
+Rahul Sharma:  debouncing it — one request after you stop clicking instead of five
+Rahul Sharma:  important design question: light toast or dark toast
+Adam Reyes:    dark. we're a serious company. mostly.
+Rahul Sharma:  rewrote add-to-cart to be optimistic and the freeze is completely gone, it feels instant now
+Rahul Sharma:  stepper is debounced + batched too, no more self-inflicted DDoS
+Adam Reyes:    just clicked around staging — night and day, this actually feels like a real store now
+Rahul Sharma:  I live for that "oh it's actually fast" moment tbh
+Adam Reyes:    remind me how we handle the fail case? want to be sure we're not lying to customers about their cart
+Rahul Sharma:  optimistic update → background reconcile → on failure roll back the count, retry once, show the toast. the cart never silently lies
+Adam Reyes:    perfect. final call: ship the optimistic cart with the rollback toast + retry
+Rahul Sharma:  shipping it 🚀
+Rahul Sharma:  deployed — cart interactions are basically instant, and I added a tiny loading shimmer so it feels intentional not broken
+Adam Reyes:    conversions dashboard is already ticking up, you're carrying the frontend fr
+Rahul Sharma:  someone's gotta 😌 (please do not make me touch the checkout CSS though)
+Adam Reyes:    no promises, that's next sprint's horror movie
+Rahul Sharma:  adding "therapy" to the sprint budget then
+Adam Reyes:    approved, easily our best-justified line item
