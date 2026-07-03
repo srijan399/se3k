@@ -3,26 +3,22 @@
     {
       "id": "person:adam-reyes",
       "type": "Person",
-      "label": "Adam Reyes",
-      "slackUserId": "U0BDR6CT8F3"
+      "label": "Adam Reyes"
     },
     {
       "id": "person:ivan-sanders",
       "type": "Person",
-      "label": "Ivan Sanders",
-      "slackUserId": "U0BDH33M603"
+      "label": "Ivan Sanders"
     },
     {
       "id": "person:rahul-sharma",
       "type": "Person",
-      "label": "Rahul Sharma",
-      "slackUserId": "U0BEB434W76"
+      "label": "Rahul Sharma"
     },
     {
       "id": "person:sam-okafor",
       "type": "Person",
-      "label": "Sam Okafor",
-      "slackUserId": "U0BDM87P0HL"
+      "label": "Sam Okafor"
     },
     {
       "id": "project:checkout-api",
@@ -49,17 +45,6 @@
       "meta": {
         "summary": "Ship optimistic cart updates with a rollback toast + retry"
       }
-    },
-    {
-      "id": "person:U0BDT3PHBK6",
-      "type": "Person",
-      "label": "Ultrode",
-      "slackUserId": "U0BDT3PHBK6"
-    },
-    {
-      "id": "project:delivery-logistics-connections",
-      "type": "Project",
-      "label": "Delivery Logistics Connections"
     }
   ],
   "edges": [
@@ -69,11 +54,11 @@
       "from": "person:adam-reyes",
       "to": "project:checkout-api",
       "weight": 1,
-      "last_active": "2026-03-04T09:57:20.967Z",
+      "last_active": "2026-03-05T09:14:42.571Z",
       "sources": [
         {
           "channel": "#backend",
-          "ts": "2026-03-04T09:57:20.968Z",
+          "ts": "2026-03-05T09:14:42.571Z",
           "excerpt": "I own the checkout service this quarter."
         }
       ]
@@ -84,11 +69,11 @@
       "from": "person:sam-okafor",
       "to": "project:checkout-api",
       "weight": 1,
-      "last_active": "2026-06-25T09:57:20.968Z",
+      "last_active": "2026-06-26T09:14:42.571Z",
       "sources": [
         {
           "channel": "#backend",
-          "ts": "2026-06-25T09:57:20.968Z",
+          "ts": "2026-06-26T09:14:42.571Z",
           "excerpt": "Wave of tickets — customers say checkout times out at peak hours."
         }
       ]
@@ -99,16 +84,16 @@
       "from": "person:ivan-sanders",
       "to": "project:checkout-api",
       "weight": 9,
-      "last_active": "2026-06-28T09:57:20.968Z",
+      "last_active": "2026-06-29T09:14:42.571Z",
       "sources": [
         {
           "channel": "#backend",
-          "ts": "2026-06-26T09:57:20.968Z",
+          "ts": "2026-06-27T09:14:42.571Z",
           "excerpt": "Reproduced it — the API stalls when the Postgres connection pool is exhausted."
         },
         {
           "channel": "#backend",
-          "ts": "2026-06-28T09:57:20.968Z",
+          "ts": "2026-06-29T09:14:42.571Z",
           "excerpt": "Shipped PgBouncer connection pooling; checkout p95 dropped 9s → 700ms."
         }
       ]
@@ -119,11 +104,11 @@
       "from": "person:adam-reyes",
       "to": "project:cart-ui",
       "weight": 1,
-      "last_active": "2026-02-02T09:57:20.968Z",
+      "last_active": "2026-02-03T09:14:42.571Z",
       "sources": [
         {
           "channel": "#frontend",
-          "ts": "2026-02-02T09:57:20.968Z",
+          "ts": "2026-02-03T09:14:42.571Z",
           "excerpt": "I own the frontend on paper but haven't touched it in months."
         }
       ]
@@ -134,16 +119,16 @@
       "from": "person:rahul-sharma",
       "to": "project:cart-ui",
       "weight": 8,
-      "last_active": "2026-06-29T09:57:20.968Z",
+      "last_active": "2026-06-30T09:14:42.572Z",
       "sources": [
         {
           "channel": "#frontend",
-          "ts": "2026-06-27T09:57:20.968Z",
+          "ts": "2026-06-28T09:14:42.572Z",
           "excerpt": "Rewrote add-to-cart to update optimistically; the UI freeze is gone."
         },
         {
           "channel": "#frontend",
-          "ts": "2026-06-29T09:57:20.968Z",
+          "ts": "2026-06-30T09:14:42.572Z",
           "excerpt": "Fixed the quantity stepper that fired a request per click."
         }
       ]
@@ -154,11 +139,11 @@
       "from": "person:adam-reyes",
       "to": "decision:adopt-pgbouncer",
       "weight": 1,
-      "last_active": "2026-06-27T09:57:20.968Z",
+      "last_active": "2026-06-28T09:14:42.572Z",
       "sources": [
         {
           "channel": "#backend",
-          "ts": "2026-06-27T09:57:20.968Z",
+          "ts": "2026-06-28T09:14:42.572Z",
           "excerpt": "Concern: PgBouncer is one more thing to run and monitor."
         }
       ]
@@ -169,11 +154,11 @@
       "from": "person:ivan-sanders",
       "to": "decision:adopt-pgbouncer",
       "weight": 1,
-      "last_active": "2026-06-28T09:57:20.968Z",
+      "last_active": "2026-06-29T09:14:42.572Z",
       "sources": [
         {
           "channel": "#backend",
-          "ts": "2026-06-28T09:57:20.968Z",
+          "ts": "2026-06-29T09:14:42.572Z",
           "excerpt": "Final call: keep PgBouncer — pool exhaustion was the real outage cause; adding monitoring."
         }
       ]
@@ -184,7 +169,7 @@
       "from": "decision:adopt-pgbouncer",
       "to": "project:checkout-api",
       "weight": 1,
-      "last_active": "2026-06-28T09:57:20.968Z",
+      "last_active": "2026-06-29T09:14:42.572Z",
       "sources": []
     },
     {
@@ -193,11 +178,11 @@
       "from": "person:adam-reyes",
       "to": "decision:optimistic-cart",
       "weight": 1,
-      "last_active": "2026-06-28T09:57:20.968Z",
+      "last_active": "2026-06-29T09:14:42.572Z",
       "sources": [
         {
           "channel": "#frontend",
-          "ts": "2026-06-28T09:57:20.968Z",
+          "ts": "2026-06-29T09:14:42.572Z",
           "excerpt": "Concern: optimistic updates could show a wrong item count if a reconcile silently fails."
         }
       ]
@@ -208,11 +193,11 @@
       "from": "person:rahul-sharma",
       "to": "decision:optimistic-cart",
       "weight": 1,
-      "last_active": "2026-06-29T09:57:20.968Z",
+      "last_active": "2026-06-30T09:14:42.572Z",
       "sources": [
         {
           "channel": "#frontend",
-          "ts": "2026-06-29T09:57:20.968Z",
+          "ts": "2026-06-30T09:14:42.572Z",
           "excerpt": "Final call: ship optimistic updates with a rollback toast + retry on failure."
         }
       ]
@@ -223,26 +208,9 @@
       "from": "decision:optimistic-cart",
       "to": "project:cart-ui",
       "weight": 1,
-      "last_active": "2026-06-29T09:57:20.968Z",
+      "last_active": "2026-06-30T09:14:42.572Z",
       "sources": []
-    },
-    {
-      "id": "INVOLVED_IN:person:U0BDT3PHBK6->project:delivery-logistics-connections",
-      "type": "INVOLVED_IN",
-      "from": "person:U0BDT3PHBK6",
-      "to": "project:delivery-logistics-connections",
-      "weight": 1,
-      "last_active": "1782984077.399459",
-      "sources": [
-        {
-          "channel": "#general",
-          "channelId": "C0BDPAW0XD0",
-          "ts": "1782984077.399459",
-          "permalink": "https://e0bdt0963v2-3hce90x3.slack.com/archives/C0BDPAW0XD0/p1782984077399459",
-          "excerpt": "I'll be picking up the delivery logistic connections"
-        }
-      ]
     }
   ],
-  "updatedAt": "2026-07-02T10:02:57.799Z"
+  "updatedAt": "2026-07-03T09:14:42.572Z"
 }
