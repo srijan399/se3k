@@ -44,7 +44,7 @@ server.registerTool('ingest_messages', {
             .describe('Map of display name → Slack user id, so Person nodes are @-mentionable'),
     },
 }, async ({ messages, channel, channelId, refs, authors }) => {
-    dbg(`ingest_messages: ${messages.split('\n').length} lines from ${channel || channelId || '?'}`);
+    dbg(`\n📨 ingest_messages · ${messages.split('\n').length} lines from ${channel || channelId || '?'}`);
     const result = await (0, extract_1.extractGraph)(messages);
     store.ingest(result, { channel, channelId }, refs, authors);
     store.save();
@@ -56,7 +56,7 @@ server.registerTool('ingest_messages', {
         decisionEdges: result.decisionEdges?.length || 0,
     };
     const snap = store.snapshot();
-    dbg('ingest_messages done', counts, `→ ${snap.nodes.length} nodes / ${snap.edges.length} edges`);
+    dbg(`🎉 ingest_messages done · ${snap.nodes.length} nodes · ${snap.edges.length} edges\n`);
     return {
         content: [
             {
@@ -71,10 +71,10 @@ server.registerTool('ask_graph', {
     description: 'Answer a natural-language question. Handles expertise routing ("who do I talk to about X" — ranked by demonstrated involvement, not assignment) and decision provenance ("why did we decide X" — reasoning + dissent). Always returns sources.',
     inputSchema: { question: zod_1.z.string() },
 }, async ({ question }) => {
-    dbg(`ask_graph: "${question}"`);
+    dbg(`\n❓ ask_graph · "${question}"`);
     store.load(); // pick up writes from other processes
     const ans = await (0, answer_1.answerQuestion)(store, question);
-    dbg(`ask_graph → kind=${ans.kind}, ${ans.sources.length} source(s)`);
+    dbg(`💬 answered · ${ans.kind} · ${ans.sources.length} source(s)\n`);
     return {
         content: [{ type: 'text', text: ans.text + (0, answer_1.formatSourcesForSlack)(ans.sources) }],
     };
@@ -111,7 +111,7 @@ server.registerTool('seed_demo', {
 async function main() {
     const transport = new stdio_js_1.StdioServerTransport();
     await server.connect(transport);
-    dbg('SE3K MCP server running on stdio');
+    dbg('🧠 SE3K brain online · MCP over stdio');
 }
 main().catch((err) => {
     console.error('[se3k:mcp] Fatal error starting MCP server:', err);

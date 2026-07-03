@@ -37,11 +37,7 @@ exports.answerQuestion = answerQuestion;
 exports.formatSourcesForSlack = formatSourcesForSlack;
 const client_1 = require("./client");
 const cache = __importStar(require("../cache/semanticCache"));
-// STDOUT is the MCP JSON-RPC transport — debug goes to stderr only.
 const dbg = (...args) => console.error('[se3k:answer]', ...args);
-// Keyword classifier — the no-LLM fallback for choosing the behavior. Order
-// matters: broad "who's doing what / status" questions are checked first so they
-// don't get mistaken for expertise routing on a single project.
 function classify(question) {
     const q = question.toLowerCase();
     if (/\b(status|overview|going on|catch me up|standup|stand-up)\b|who('?s| is)?\s+doing\s+what|who owns what|what('?s| is)?\s+(everyone|everybody|the team|we|people)\s+(doing|working on|up to)|update (of|on) who/.test(q)) {
@@ -63,9 +59,6 @@ function stripFences(s) {
 function escapeRegExp(s) {
     return s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 }
-// Turn the LLM's markdown into Slack markup: tag each known person as <@id>
-// (removing any ** or * around their name), then convert any remaining **bold**
-// into Slack's *bold*. People without a Slack id keep their plain name.
 function renderForSlack(text, people) {
     const seen = new Set();
     const withId = people
@@ -77,8 +70,6 @@ function renderForSlack(text, people) {
     }
     return text.replace(/\*\*([^*]+)\*\*/g, '*$1*');
 }
-// Render one citation. With a real permalink we emit a clickable Slack link
-// straight to the source message ("proof"); otherwise fall back to text.
 function fmtSource(s) {
     const where = s.channel || 'Slack';
     const quote = s.excerpt ? ` — "${s.excerpt}"` : '';
@@ -87,11 +78,6 @@ function fmtSource(s) {
         return `<${s.permalink}|${label}>`;
     return `${where}${s.ts ? ` @ ${s.ts}` : ''}${quote}`;
 }
-// ---------------------------------------------------------------------------
-// Query routing: map a question to ONE graph node + intent using a COMPACT
-// catalog (node LABELS only — no message bodies), so it's cheap and robust even
-// when the question is loosely worded. Example-driven for the small model.
-// ---------------------------------------------------------------------------
 const ROUTER_SYSTEM = `You route a user's question in a team knowledge graph: label the intent and, when it's about ONE specific thing, pick the matching node id.
 
 Return STRICT JSON only: { "intent": "expertise" | "provenance" | "overview", "targetId": "<an id from the catalog, or empty string>" }
@@ -112,13 +98,10 @@ Q: "who owns the mobile app?"                          → {"intent":"expertise"
 
 Output ONLY the JSON object.`;
 async function resolveQuery(store, question) {
-    // Person-scoped first: "what is <person> working on?" — answer about THAT
-    // person only, not the whole team. Needs both a named person AND a work/status
-    // phrasing (so "who knows X" isn't hijacked).
     const person = store.findPersonByText(question);
     if (person &&
         /(working on|work on|worked on|\bworking\b|\bdoing\b|up to|focus|\binvolved\b|responsible|\btasks?\b|contributing|been on|update on|status of|what (is|are|has|'?s) )/i.test(question)) {
-        dbg(`router → intent=person (${person.label})`);
+        dbg(`🧭 router → person · ${person.label}`);
         return { intent: 'person', node: person };
     }
     const projects = store.listProjects();
@@ -141,7 +124,7 @@ async function resolveQuery(store, question) {
                 : parsed.intent === 'overview'
                     ? 'overview'
                     : 'expertise';
-            dbg(`router → intent=${intent} targetId=${parsed.targetId || '(none)'}`);
+            dbg(`🧭 router → ${intent}${parsed.targetId ? ` · ${parsed.targetId}` : ''}`);
             if (intent === 'overview')
                 return { intent };
             const node = parsed.targetId ? store.getNode(parsed.targetId) : undefined;
@@ -159,7 +142,7 @@ async function resolveQuery(store, question) {
         }
     }
     const intent = classify(question);
-    dbg(`router (heuristic) → intent=${intent}`);
+    dbg(`🧭 router (keyword) → ${intent}`);
     if (intent === 'overview')
         return { intent };
     return {
@@ -198,7 +181,10 @@ async function personAnswer(store, person, question) {
 async function overviewAnswer(store, question) {
     const perProject = store
         .listProjects()
-        .map((project) => ({ project, top: store.rankExperts(project.id).slice(0, 2) }))
+        .map((project) => ({
+        project,
+        top: store.rankExperts(project.id).slice(0, 2),
+    }))
         .filter((x) => x.top.length > 0)
         .sort((a, b) => b.top[0].score - a.top[0].score);
     if (perProject.length === 0) {
@@ -213,7 +199,11 @@ async function overviewAnswer(store, question) {
     const facts = perProject
         .map((x) => {
         const lead = x.top[0];
-        const ev = lead.edge.sources.map((s) => s.excerpt).filter(Boolean).slice(-1).join('');
+        const ev = lead.edge.sources
+            .map((s) => s.excerpt)
+            .filter(Boolean)
+            .slice(-1)
+            .join('');
         const others = x.top.slice(1).map((t) => t.person.label);
         return `${x.project.label}: ${lead.person.label} is driving it (score ${lead.score.toFixed(1)}${ev ? `, e.g. "${ev}"` : ''})${others.length ? `; also ${others.join(', ')}` : ''}.`;
     })
@@ -223,11 +213,6 @@ async function overviewAnswer(store, question) {
         .join('\n'));
     return { kind: 'overview', text: renderForSlack(text, people), sources };
 }
-// ---------------------------------------------------------------------------
-// Phrasing: turn grounded facts into a Slack answer. Example-driven so the
-// small model keeps the right tone and never invents. If no LLM is configured,
-// the deterministic `fallback` string is returned (demo insurance policy).
-// ---------------------------------------------------------------------------
 const PHRASE_SYSTEM = `You are SE3K, a Slack knowledge-graph agent. Answer STRICTLY from the grounded facts in the user message — never invent people, projects, quotes, weights, or timestamps that are not present. Be concise, direct, and Slack-friendly: short sentences, **bold** the key person's name. Do NOT write a "Sources" list; the app appends citations separately.
 
 EXAMPLE — expertise:
@@ -241,7 +226,11 @@ async function phrase(prompt, fallback) {
     if (!client_1.llmEnabled)
         return fallback;
     try {
-        const out = await (0, client_1.chat)({ system: PHRASE_SYSTEM, user: prompt, temperature: 0.3 });
+        const out = await (0, client_1.chat)({
+            system: PHRASE_SYSTEM,
+            user: prompt,
+            temperature: 0.3,
+        });
         return out.trim() || fallback;
     }
     catch (err) {
@@ -264,7 +253,7 @@ async function answerQuestion(store, question) {
     return ans;
 }
 async function computeAnswer(store, question) {
-    dbg(`computeAnswer: "${question}"`);
+    dbg(`🔮 answering · "${question}"`);
     const { intent, node } = await resolveQuery(store, question);
     if (intent === 'person')
         return personAnswer(store, node, question);
@@ -272,8 +261,12 @@ async function computeAnswer(store, question) {
         return overviewAnswer(store, question);
     // Behavior follows the resolved node's type; intent only matters when nothing
     // resolved.
-    const kind = node?.type === 'Decision' ? 'provenance' : node?.type === 'Project' ? 'expertise' : intent;
-    dbg(`resolved kind=${kind} node=${node?.id || '(none)'}`);
+    const kind = node?.type === 'Decision'
+        ? 'provenance'
+        : node?.type === 'Project'
+            ? 'expertise'
+            : intent;
+    dbg(`🧭 kind=${kind} · node=${node?.id || '—'}`);
     if (kind === 'expertise') {
         const project = node && node.type === 'Project' ? node : undefined;
         if (!project) {
@@ -281,12 +274,14 @@ async function computeAnswer(store, question) {
             return {
                 kind: 'unknown',
                 sources: [],
-                text: `I don't have any project in the graph that matches that yet. Known projects: ${store.listProjects().map((p) => p.label).join(', ') ||
-                    '(none — ingest some messages first)'}.`,
+                text: `I don't have any project in the graph that matches that yet. Known projects: ${store
+                    .listProjects()
+                    .map((p) => p.label)
+                    .join(', ') || '(none — ingest some messages first)'}.`,
             };
         }
         const ranked = store.rankExperts(project.id).slice(0, 3);
-        dbg(`ranked experts for ${project.id}:`, ranked.map((r) => `${r.person.label}=${r.score.toFixed(1)}`));
+        dbg(`🏆 ranked ${project.label}:`, ranked.map((r) => `${r.person.label} ${r.score.toFixed(1)}`).join(' · '));
         if (ranked.length === 0) {
             return {
                 kind: 'unknown',
@@ -303,7 +298,11 @@ async function computeAnswer(store, question) {
             .join(' | ')}`)
             .join('\n');
         const text = await phrase(`Question: "${question}"\n\nThe person with the strongest DEMONSTRATED involvement in "${project.label}" (ranked by accumulated weight + recency, NOT by formal assignment) is:\n\n${facts}\n\nWrite a concise Slack answer (2-4 sentences) naming the top person to talk to and why, then mention the runner-up. Make clear this is based on who actually did the work, not who's assigned. Do not invent anyone not listed.`, `**Talk to ${ranked[0].person.label}** about ${project.label}. They have the deepest hands-on involvement (score ${ranked[0].score.toFixed(1)}). ${ranked[1] ? `Runner-up: ${ranked[1].person.label}.` : ''}`);
-        return { kind, text: renderForSlack(text, ranked.map((r) => r.person)), sources };
+        return {
+            kind,
+            text: renderForSlack(text, ranked.map((r) => r.person)),
+            sources,
+        };
     }
     // provenance
     const decision = node && node.type === 'Decision' ? node : undefined;
@@ -312,16 +311,25 @@ async function computeAnswer(store, question) {
         return {
             kind: 'unknown',
             sources: [],
-            text: `I don't have a decision in the graph matching that. Known decisions: ${store.listDecisions().map((d) => d.label).join(' | ') || '(none yet)'}.`,
+            text: `I don't have a decision in the graph matching that. Known decisions: ${store
+                .listDecisions()
+                .map((d) => d.label)
+                .join(' | ') || '(none yet)'}.`,
         };
     }
     const prov = store.decisionProvenance(decision.id);
-    dbg(`provenance for ${decision.id}: ${prov.concerns.length} concern(s), ${prov.calls.length} call(s)`);
+    dbg(`⚖️  provenance · ${prov.concerns.length} concern(s) · ${prov.calls.length} call(s)`);
     const sources = [...prov.concerns, ...prov.calls].flatMap((x) => x.edge.sources);
     const facts = [
         `Decision: ${prov.decision.label}`,
-        ...prov.concerns.map((c) => `Concern raised by ${c.person.label}: ${c.edge.sources.map((s) => s.excerpt).filter(Boolean).join(' | ')}`),
-        ...prov.calls.map((c) => `Final call made by ${c.person.label}: ${c.edge.sources.map((s) => s.excerpt).filter(Boolean).join(' | ')}`),
+        ...prov.concerns.map((c) => `Concern raised by ${c.person.label}: ${c.edge.sources
+            .map((s) => s.excerpt)
+            .filter(Boolean)
+            .join(' | ')}`),
+        ...prov.calls.map((c) => `Final call made by ${c.person.label}: ${c.edge.sources
+            .map((s) => s.excerpt)
+            .filter(Boolean)
+            .join(' | ')}`),
     ].join('\n');
     const text = await phrase(`Question: "${question}"\n\nHere is the recorded provenance of this decision (the reasoning and dissent behind it, not just the outcome):\n\n${facts}\n\nWrite a concise Slack answer (3-5 sentences) explaining WHY this was decided: surface who pushed back and on what grounds, and who made the final call. Do not invent details beyond what's listed.`, `**${prov.decision.label}**\n${facts}`);
     const people = [...prov.concerns, ...prov.calls].map((x) => x.person);
@@ -332,5 +340,9 @@ function formatSourcesForSlack(sources) {
     const unique = sources.filter((s, i, arr) => arr.findIndex((o) => o.excerpt === s.excerpt && o.ts === s.ts) === i);
     if (unique.length === 0)
         return '';
-    return '\n\n*Sources:*\n' + unique.slice(0, 5).map((s) => `• ${fmtSource(s)}`).join('\n');
+    return ('\n\n*Sources:*\n' +
+        unique
+            .slice(0, 5)
+            .map((s) => `• ${fmtSource(s)}`)
+            .join('\n'));
 }

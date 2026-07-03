@@ -106,7 +106,7 @@ class GraphStore {
             const raw = JSON.parse(fs.readFileSync(this.filePath, 'utf-8'));
             this.nodes = new Map((raw.nodes || []).map((n) => [n.id, n]));
             this.edges = new Map((raw.edges || []).map((e) => [e.id, e]));
-            dbg(`loaded ${this.nodes.size} nodes / ${this.edges.size} edges from ${this.filePath}`);
+            dbg(`📂 loaded ${this.nodes.size} nodes · ${this.edges.size} edges`);
         }
         catch (err) {
             dbg('load failed (starting empty):', err);
@@ -117,7 +117,7 @@ class GraphStore {
         if (!fs.existsSync(dir))
             fs.mkdirSync(dir, { recursive: true });
         fs.writeFileSync(this.filePath, JSON.stringify(this.snapshot(), null, 2));
-        dbg(`saved ${this.nodes.size} nodes / ${this.edges.size} edges`);
+        dbg(`💾 saved ${this.nodes.size} nodes · ${this.edges.size} edges`);
     }
     snapshot() {
         return {
@@ -129,7 +129,7 @@ class GraphStore {
     clear() {
         this.nodes.clear();
         this.edges.clear();
-        dbg('cleared graph');
+        dbg('🧹 cleared graph');
     }
     // Cheap content signature that changes iff the graph changed (unlike
     // snapshot().updatedAt, which changes on every read). Used by the semantic
@@ -163,7 +163,7 @@ class GraphStore {
         const id = `person:${slackUserId || slug(name)}`;
         const node = { id, type: 'Person', label: name, slackUserId };
         this.nodes.set(id, node);
-        dbg(`+ Person "${name}" (${id})`);
+        dbg(`  🔎 found node · 🧑 Person   ${name}`);
         return node;
     }
     upsertProject(key, name) {
@@ -173,7 +173,7 @@ class GraphStore {
             return existing;
         const node = { id, type: 'Project', label: name || key };
         this.nodes.set(id, node);
-        dbg(`+ Project "${node.label}" (${id})`);
+        dbg(`  🔎 found node · 📁 Project  ${node.label}`);
         return node;
     }
     upsertDecision(key, summary) {
@@ -188,7 +188,7 @@ class GraphStore {
             meta: { summary: summary || key },
         };
         this.nodes.set(id, node);
-        dbg(`+ Decision "${node.label}" (${id})`);
+        dbg(`  🔎 found node · ⚖️  Decision ${node.label}`);
         return node;
     }
     upsertChannel(name, channelId) {
@@ -202,6 +202,10 @@ class GraphStore {
     }
     getNode(id) {
         return this.nodes.get(id);
+    }
+    // Human label for a node id (for readable edge logs).
+    label(id) {
+        return this.nodes.get(id)?.label ?? id;
     }
     // Backfill Slack user ids onto existing Person nodes by name (from the bot's
     // workspace lookup), so seeded/older people become @-mentionable. Only fills
@@ -236,7 +240,7 @@ class GraphStore {
             if (ts > existing.last_active)
                 existing.last_active = ts;
             existing.sources.push(source);
-            dbg(`~ INVOLVED_IN ${personId} → ${projectId} (+${weight}, total ${existing.weight})`);
+            dbg(`     ↳ 🔗 INVOLVED_IN  ${this.label(personId)} → ${this.label(projectId)}  (+${weight} → w${existing.weight})`);
             return existing;
         }
         const edge = {
@@ -249,7 +253,7 @@ class GraphStore {
             sources: [source],
         };
         this.edges.set(id, edge);
-        dbg(`+ INVOLVED_IN ${personId} → ${projectId} (weight ${weight})`);
+        dbg(`     ↳ 🔗 INVOLVED_IN  ${this.label(personId)} → ${this.label(projectId)}  (w${weight})`);
         return edge;
     }
     // Generic relation edge (RAISED_CONCERN / MADE_CALL / RELATES_TO / POSTED_IN).
@@ -274,7 +278,7 @@ class GraphStore {
             sources: source ? [source] : [],
         };
         this.edges.set(id, edge);
-        dbg(`+ ${type} ${from} → ${to}`);
+        dbg(`     ↳ 🔗 ${type}  ${this.label(from)} → ${this.label(to)}`);
         return edge;
     }
     // ---------- ingestion ----------
@@ -282,9 +286,9 @@ class GraphStore {
     // LLM's [mN] source tags to real Slack ts + permalink so citations link to the
     // exact message; when a ref is present we also use its real ts on the edge.
     ingest(result, channel, refs, authors) {
-        dbg(`ingest: people=${result.people?.length || 0} projects=${result.projects?.length || 0} ` +
-            `decisions=${result.decisions?.length || 0} involvement=${result.involvement?.length || 0} ` +
-            `decisionEdges=${result.decisionEdges?.length || 0}`);
+        dbg(`📥 ingest · ${result.people?.length || 0} people · ${result.projects?.length || 0} projects · ` +
+            `${result.decisions?.length || 0} decisions · ${result.involvement?.length || 0} involvement · ` +
+            `${result.decisionEdges?.length || 0} decision-edges`);
         // authors maps a display name → Slack user id (supplied by the bot) so Person
         // nodes carry a real id and answers can @-mention them. Matched by slug so
         // "Adam" and "Adam Reyes" resolve to the same id.
@@ -302,7 +306,7 @@ class GraphStore {
             const person = this.upsertPerson(inv.person, authorId(inv.person));
             const project = this.resolveProject(inv.project);
             if (!project) {
-                dbg(`ingest: dropped involvement — unknown project "${inv.project}"`);
+                dbg(`     ⚠️  dropped involvement — unknown project "${inv.project}"`);
                 continue;
             }
             const ref = lookupRef(refs, inv.ref) || bestRefByText(refs, inv.evidence);
@@ -318,7 +322,7 @@ class GraphStore {
             const person = this.upsertPerson(de.person, authorId(de.person));
             const decision = this.resolveDecision(de.decision);
             if (!decision) {
-                dbg(`ingest: dropped decisionEdge — unknown decision "${de.decision}"`);
+                dbg(`     ⚠️  dropped decision-edge — unknown decision "${de.decision}"`);
                 continue;
             }
             const ref = lookupRef(refs, de.ref) || bestRefByText(refs, de.evidence);
@@ -341,8 +345,8 @@ class GraphStore {
         // people who only chatted (no involvement / decision) never become clutter.
         const pruned = this.pruneOrphans();
         if (pruned)
-            dbg(`pruned ${pruned} orphan node(s) (chatter with no edges)`);
-        dbg(`ingest done → graph is ${this.nodes.size} nodes / ${this.edges.size} edges`);
+            dbg(`🧽 pruned ${pruned} orphan node(s) (chatter, no edges)`);
+        dbg(`✅ ingest done · graph: ${this.nodes.size} nodes · ${this.edges.size} edges`);
     }
     // Remove any node not referenced by an edge (globally — also cleans orphans
     // left by earlier batches).

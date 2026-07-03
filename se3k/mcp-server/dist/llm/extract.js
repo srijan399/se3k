@@ -114,7 +114,7 @@ function stripFences(s) {
 // split thread (otherwise a 30-message convo fragments into "Checkout API" +
 // "Checkout Service" etc.).
 async function extractChunk(chunkText, known) {
-    dbg(`extractChunk: ${chunkText.split('\n').length} lines, ${chunkText.length} chars`);
+    dbg(`🧠 extract · chunk (${chunkText.split('\n').length} lines)`);
     const hint = known && (known.projects.size || known.decisions.size)
         ? `Entities already extracted earlier in THIS conversation — reuse these exact keys when relevant, do NOT invent near-duplicate keys for the same thing:\n` +
             `projects: ${[...known.projects].map(([k, n]) => `${k} (${n})`).join(', ') || '(none)'}\n` +
@@ -129,13 +129,13 @@ async function extractChunk(chunkText, known) {
     try {
         const parsed = JSON.parse(stripFences(raw));
         const merged = { ...EMPTY, ...parsed };
-        dbg(`extractChunk → people=${merged.people.length} projects=${merged.projects.length} ` +
-            `decisions=${merged.decisions.length} involvement=${merged.involvement.length} ` +
-            `decisionEdges=${merged.decisionEdges.length}`);
+        dbg(`   → ${merged.people.length} people · ${merged.projects.length} projects · ` +
+            `${merged.decisions.length} decisions · ${merged.involvement.length} involvement · ` +
+            `${merged.decisionEdges.length} decision-edges`);
         return merged;
     }
     catch (err) {
-        dbg('extractChunk: failed to parse LLM JSON:', err, '\nraw:', raw);
+        dbg('⚠️  extract · failed to parse LLM JSON:', err, '\nraw:', raw);
         return EMPTY;
     }
 }
@@ -153,7 +153,7 @@ function mergeInto(acc, r) {
 // Chunks + extracts sequentially (rate-limit friendly), then merges.
 async function extractGraph(messagesText) {
     const chunks = chunkMessages(messagesText);
-    dbg(`extractGraph: ${messagesText.split('\n').length} lines → ${chunks.length} chunk(s)`);
+    dbg(`✂️  ${messagesText.split('\n').length} lines → ${chunks.length} chunk(s)`);
     if (chunks.length <= 1)
         return extractChunk(messagesText);
     const acc = {
@@ -166,7 +166,7 @@ async function extractGraph(messagesText) {
     };
     const known = { projects: new Map(), decisions: new Map() };
     for (let i = 0; i < chunks.length; i++) {
-        dbg(`extractGraph: chunk ${i + 1}/${chunks.length}`);
+        dbg(`🧠 extract · chunk ${i + 1}/${chunks.length}`);
         try {
             const res = await extractChunk(chunks[i], known);
             mergeInto(acc, res);
@@ -178,10 +178,10 @@ async function extractGraph(messagesText) {
                     known.decisions.set(d.key, d.summary || d.key);
         }
         catch (err) {
-            dbg(`extractGraph: chunk ${i + 1}/${chunks.length} failed:`, err);
+            dbg(`⚠️  extract · chunk ${i + 1}/${chunks.length} failed:`, err);
         }
     }
-    dbg(`extractGraph done → people=${acc.people.length} projects=${acc.projects.length} ` +
-        `decisions=${acc.decisions.length} involvement=${acc.involvement.length}`);
+    dbg(`🧠 extract done · ${acc.people.length} people · ${acc.projects.length} projects · ` +
+        `${acc.decisions.length} decisions · ${acc.involvement.length} involvement`);
     return acc;
 }

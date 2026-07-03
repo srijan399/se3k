@@ -46,10 +46,10 @@ async function lookup(question, version) {
             best = { entry: e, score };
     }
     if (best && best.score >= THRESHOLD) {
-        dbg(`HIT (${best.score.toFixed(3)}) "${question}" ↦ "${best.entry.question}"`);
+        dbg(`⚡ cache HIT (${best.score.toFixed(3)}) · "${question}" ↦ "${best.entry.question}"`);
         return { result: best.entry.result, embedding: vec };
     }
-    dbg(`MISS${best ? ` (best ${best.score.toFixed(3)})` : ''} "${question}"`);
+    dbg(`   cache miss${best ? ` (best ${best.score.toFixed(3)})` : ''} · "${question}"`);
     return { result: null, embedding: vec };
 }
 // Remember an answer. Reuses the embedding computed during lookup when provided.
@@ -62,5 +62,5 @@ async function store(question, result, version, embedding) {
     entries.push({ vec, question, result, version });
     if (entries.length > MAX)
         entries.splice(0, entries.length - MAX); // drop oldest
-    dbg(`stored "${question}" (${entries.length}/${MAX})`);
+    dbg(`   ↳ cached "${question}" (${entries.length}/${MAX})`);
 }

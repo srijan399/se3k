@@ -7,10 +7,6 @@ import { extractGraph } from './llm/extract';
 import { answerQuestion, formatSourcesForSlack } from './llm/answer';
 import { seed } from './seed';
 
-// SE3K MCP server — the "brain". Owns the graph and exposes the tools the Slack
-// bot calls: ingest messages, ask the graph, get a snapshot, (re)seed the demo.
-//
-// STDOUT is the JSON-RPC transport, so every log MUST go to stderr (console.error).
 const dbg = (...args: unknown[]) => console.error('[se3k:mcp]', ...args);
 
 const store = new GraphStore();
@@ -26,7 +22,9 @@ server.registerTool(
   },
   async ({ message }) => {
     dbg('ping', message ?? '');
-    return { content: [{ type: 'text', text: `pong${message ? `: ${message}` : ''}` }] };
+    return {
+      content: [{ type: 'text', text: `pong${message ? `: ${message}` : ''}` }],
+    };
   },
 );
 
@@ -37,8 +35,15 @@ server.registerTool(
     description:
       'Run LLM extraction over a batch of Slack messages and merge the resulting people/projects/decisions and weighted INVOLVED_IN edges into the graph. Messages are one per line, each prefixed with a [mN] tag.',
     inputSchema: {
-      messages: z.string().describe('Raw Slack messages, newline-separated, each prefixed with [mN]'),
-      channel: z.string().optional().describe('Human-readable channel name, e.g. #backend'),
+      messages: z
+        .string()
+        .describe(
+          'Raw Slack messages, newline-separated, each prefixed with [mN]',
+        ),
+      channel: z
+        .string()
+        .optional()
+        .describe('Human-readable channel name, e.g. #backend'),
       channelId: z.string().optional(),
       refs: z
         .record(
@@ -50,15 +55,21 @@ server.registerTool(
           }),
         )
         .optional()
-        .describe('Map of [mN] tag → { ts, permalink, text } for exact-message citations'),
+        .describe(
+          'Map of [mN] tag → { ts, permalink, text } for exact-message citations',
+        ),
       authors: z
         .record(z.string(), z.string())
         .optional()
-        .describe('Map of display name → Slack user id, so Person nodes are @-mentionable'),
+        .describe(
+          'Map of display name → Slack user id, so Person nodes are @-mentionable',
+        ),
     },
   },
   async ({ messages, channel, channelId, refs, authors }) => {
-    dbg(`ingest_messages: ${messages.split('\n').length} lines from ${channel || channelId || '?'}`);
+    dbg(
+      `\n📨 ingest_messages · ${messages.split('\n').length} lines from ${channel || channelId || '?'}`,
+    );
     const result = await extractGraph(messages);
     store.ingest(result, { channel, channelId }, refs, authors);
     store.save();
@@ -70,7 +81,9 @@ server.registerTool(
       decisionEdges: result.decisionEdges?.length || 0,
     };
     const snap = store.snapshot();
-    dbg('ingest_messages done', counts, `→ ${snap.nodes.length} nodes / ${snap.edges.length} edges`);
+    dbg(
+      `🎉 ingest_messages done · ${snap.nodes.length} nodes · ${snap.edges.length} edges\n`,
+    );
     return {
       content: [
         {
@@ -91,12 +104,14 @@ server.registerTool(
     inputSchema: { question: z.string() },
   },
   async ({ question }) => {
-    dbg(`ask_graph: "${question}"`);
+    dbg(`\n❓ ask_graph · "${question}"`);
     store.load(); // pick up writes from other processes
     const ans = await answerQuestion(store, question);
-    dbg(`ask_graph → kind=${ans.kind}, ${ans.sources.length} source(s)`);
+    dbg(`💬 answered · ${ans.kind} · ${ans.sources.length} source(s)\n`);
     return {
-      content: [{ type: 'text', text: ans.text + formatSourcesForSlack(ans.sources) }],
+      content: [
+        { type: 'text', text: ans.text + formatSourcesForSlack(ans.sources) },
+      ],
     };
   },
 );
@@ -105,13 +120,16 @@ server.registerTool(
   'get_graph_snapshot',
   {
     title: 'Get graph snapshot',
-    description: 'Return the full graph (nodes + edges) as JSON, for the dashboard.',
+    description:
+      'Return the full graph (nodes + edges) as JSON, for the dashboard.',
     inputSchema: {},
   },
   async () => {
     store.load();
     const snap = store.snapshot();
-    dbg(`get_graph_snapshot → ${snap.nodes.length} nodes / ${snap.edges.length} edges`);
+    dbg(
+      `get_graph_snapshot → ${snap.nodes.length} nodes / ${snap.edges.length} edges`,
+    );
     return { content: [{ type: 'text', text: JSON.stringify(snap) }] };
   },
 );
@@ -136,7 +154,8 @@ server.registerTool(
   'seed_demo',
   {
     title: 'Seed demo graph',
-    description: 'Reset the graph to the deterministic demo scenario (no LLM needed).',
+    description:
+      'Reset the graph to the deterministic demo scenario (no LLM needed).',
     inputSchema: {},
   },
   async () => {
@@ -149,7 +168,7 @@ server.registerTool(
 async function main() {
   const transport = new StdioServerTransport();
   await server.connect(transport);
-  dbg('SE3K MCP server running on stdio');
+  dbg('🧠 SE3K brain online · MCP over stdio');
 }
 
 main().catch((err) => {

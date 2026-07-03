@@ -1,18 +1,8 @@
 import { ExtractionResult } from '../graph/types';
 import { chat } from './client';
 
-// NOTE ON LOGGING: this process is an MCP server whose STDOUT is the JSON-RPC
-// transport. All debug output MUST go to stderr (console.error) or it corrupts
-// the protocol. `dbg` centralizes that.
 const dbg = (...args: unknown[]) => console.error('[se3k:extract]', ...args);
 
-// ============================================================================
-// THE EXTRACTION PROMPT — the heart of the project.
-// Longer + example-driven on purpose: the default model is small (llama-3.1-8b),
-// and a concrete worked example makes weighting and the "assignee ≠ expert" rule
-// far more reliable than abstract instructions alone. Keep the prompt AND its
-// JSON schema together here so they iterate as one unit (AGENTS.md).
-// ============================================================================
 const EXTRACTION_SYSTEM = `You are SE3K's extraction engine. You read raw Slack conversation logs from a tech company and turn them into a knowledge graph that answers ONE question better than Jira ever could: "who ACTUALLY knows about X" — judged by demonstrated hands-on work, NOT by who is formally assigned.
 
 OUTPUT: STRICT JSON only (no prose, no markdown fences) matching this schema:
@@ -94,7 +84,10 @@ export function chunkMessages(
   let buf: string[] = [];
   let chars = 0;
   for (const line of lines) {
-    if (buf.length > 0 && (buf.length >= maxLines || chars + line.length > maxChars)) {
+    if (
+      buf.length > 0 &&
+      (buf.length >= maxLines || chars + line.length > maxChars)
+    ) {
       chunks.push(buf.join('\n'));
       const overlap = buf.slice(-1);
       buf = [...overlap];
@@ -123,12 +116,11 @@ interface KnownEntities {
   decisions: Map<string, string>; // key → summary
 }
 
-// Extract entities/edges from ONE bounded chunk (a single LLM call). `known`
-// carries the keys from earlier chunks so extraction stays consistent across a
-// split thread (otherwise a 30-message convo fragments into "Checkout API" +
-// "Checkout Service" etc.).
-async function extractChunk(chunkText: string, known?: KnownEntities): Promise<ExtractionResult> {
-  dbg(`extractChunk: ${chunkText.split('\n').length} lines, ${chunkText.length} chars`);
+async function extractChunk(
+  chunkText: string,
+  known?: KnownEntities,
+): Promise<ExtractionResult> {
+  dbg(`🧠 extract · chunk (${chunkText.split('\n').length} lines)`);
   const hint =
     known && (known.projects.size || known.decisions.size)
       ? `Entities already extracted earlier in THIS conversation — reuse these exact keys when relevant, do NOT invent near-duplicate keys for the same thing:\n` +
@@ -145,13 +137,13 @@ async function extractChunk(chunkText: string, known?: KnownEntities): Promise<E
     const parsed = JSON.parse(stripFences(raw)) as Partial<ExtractionResult>;
     const merged = { ...EMPTY, ...parsed };
     dbg(
-      `extractChunk → people=${merged.people.length} projects=${merged.projects.length} ` +
-        `decisions=${merged.decisions.length} involvement=${merged.involvement.length} ` +
-        `decisionEdges=${merged.decisionEdges.length}`,
+      `   → ${merged.people.length} people · ${merged.projects.length} projects · ` +
+        `${merged.decisions.length} decisions · ${merged.involvement.length} involvement · ` +
+        `${merged.decisionEdges.length} decision-edges`,
     );
     return merged;
   } catch (err) {
-    dbg('extractChunk: failed to parse LLM JSON:', err, '\nraw:', raw);
+    dbg('⚠️  extract · failed to parse LLM JSON:', err, '\nraw:', raw);
     return EMPTY;
   }
 }
@@ -169,9 +161,13 @@ function mergeInto(acc: ExtractionResult, r: ExtractionResult): void {
 
 // Public API (unchanged signature): any-sized blob in → one merged result out.
 // Chunks + extracts sequentially (rate-limit friendly), then merges.
-export async function extractGraph(messagesText: string): Promise<ExtractionResult> {
+export async function extractGraph(
+  messagesText: string,
+): Promise<ExtractionResult> {
   const chunks = chunkMessages(messagesText);
-  dbg(`extractGraph: ${messagesText.split('\n').length} lines → ${chunks.length} chunk(s)`);
+  dbg(
+    `✂️  ${messagesText.split('\n').length} lines → ${chunks.length} chunk(s)`,
+  );
   if (chunks.length <= 1) return extractChunk(messagesText);
 
   const acc: ExtractionResult = {
@@ -184,19 +180,21 @@ export async function extractGraph(messagesText: string): Promise<ExtractionResu
   };
   const known: KnownEntities = { projects: new Map(), decisions: new Map() };
   for (let i = 0; i < chunks.length; i++) {
-    dbg(`extractGraph: chunk ${i + 1}/${chunks.length}`);
+    dbg(`🧠 extract · chunk ${i + 1}/${chunks.length}`);
     try {
       const res = await extractChunk(chunks[i], known);
       mergeInto(acc, res);
-      for (const p of res.projects || []) if (p.key) known.projects.set(p.key, p.name || p.key);
-      for (const d of res.decisions || []) if (d.key) known.decisions.set(d.key, d.summary || d.key);
+      for (const p of res.projects || [])
+        if (p.key) known.projects.set(p.key, p.name || p.key);
+      for (const d of res.decisions || [])
+        if (d.key) known.decisions.set(d.key, d.summary || d.key);
     } catch (err) {
-      dbg(`extractGraph: chunk ${i + 1}/${chunks.length} failed:`, err);
+      dbg(`⚠️  extract · chunk ${i + 1}/${chunks.length} failed:`, err);
     }
   }
   dbg(
-    `extractGraph done → people=${acc.people.length} projects=${acc.projects.length} ` +
-      `decisions=${acc.decisions.length} involvement=${acc.involvement.length}`,
+    `🧠 extract done · ${acc.people.length} people · ${acc.projects.length} projects · ` +
+      `${acc.decisions.length} decisions · ${acc.involvement.length} involvement`,
   );
   return acc;
 }
