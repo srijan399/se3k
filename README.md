@@ -2,7 +2,7 @@
   <img src="web/public/logo.png" alt="SE3K" width="140" />
 </p>
 
-# SE3K: _"Who actually knows this?"_
+# SE3K — _"Who actually knows this?"_
 
 > An org brain that lives in Slack. It surfaces **who really knows about X**,
 > ranked by demonstrated work rather than who's assigned, and **why past decisions
@@ -77,7 +77,7 @@ Three small services, wired so the **MCP server is the brain** and everything el
 is I/O:
 
 <p align="center">
-  <img src="web/public/Arch_Diagram.png" alt="SE3K architecture" width="820" />
+  <img src="web/public/Architecture_Se3k.png" alt="SE3K architecture" width="820" />
 </p>
 
 - **The bot** (Bolt, Socket Mode) is a genuine **MCP client**: it spawns the brain
