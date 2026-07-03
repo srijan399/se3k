@@ -4,8 +4,6 @@ import { mcp } from './mcpClient';
 
 dotenv.config();
 
-// The bot's stdout is a normal terminal (unlike the MCP server), so console.log
-// is fine here. One prefixed helper keeps the terminal output scannable.
 const dbg = (...args: unknown[]) => console.log('[se3k:bot]', ...args);
 
 const { SLACK_BOT_TOKEN, SLACK_APP_TOKEN, SLACK_SIGNING_SECRET } = process.env;
@@ -25,15 +23,20 @@ const app = new App({
 });
 
 // ---- Tunables --------------------------------------------------------------
-const BATCH_SIZE = 12; // flush a channel's buffer at this many lines…
-const FLUSH_DEBOUNCE_MS = 20_000; // …or after this much quiet, whichever first
-const BACKFILL_LIMIT = 50; // messages pulled when the bot joins a channel
+const BATCH_SIZE = 12;
+const FLUSH_DEBOUNCE_MS = 20_000;
+const BACKFILL_LIMIT = 50;
 const BACKFILL_MAX = 200;
 
-// ---- In-memory state (hackathon shortcut: fine to lose on restart) ---------
 let botUserId: string | undefined;
 let teamUrl: string | undefined; // e.g. https://myteam.slack.com/ — for permalinks
-type BufEntry = { name: string; userId: string; text: string; ts?: string; permalink?: string };
+type BufEntry = {
+  name: string;
+  userId: string;
+  text: string;
+  ts?: string;
+  permalink?: string;
+};
 const buffers = new Map<string, BufEntry[]>(); // channelId -> buffered messages
 const flushTimers = new Map<string, NodeJS.Timeout>(); // channelId -> debounce timer
 const channelNames = new Map<string, string>(); // channelId -> #name (cache)
@@ -48,7 +51,11 @@ async function resolveUserName(userId: string): Promise<string> {
   if (cached) return cached;
   try {
     const res = await app.client.users.info({ user: userId });
-    const u = res.user as { profile?: { real_name?: string }; real_name?: string; name?: string };
+    const u = res.user as {
+      profile?: { real_name?: string };
+      real_name?: string;
+      name?: string;
+    };
     const name = u?.profile?.real_name || u?.real_name || u?.name || userId;
     userNames.set(userId, name);
     dbg(`resolved user ${userId} → "${name}"`);
@@ -78,6 +85,18 @@ function permalinkFor(channelId: string, ts?: string): string | undefined {
   return `${teamUrl}archives/${channelId}/p${ts.replace('.', '')}`;
 }
 
+// Key-gated link to this workspace's graph in the web dashboard, appended to the
+// /se3k-backfill reply. Empty when DASHBOARD_KEY isn't configured.
+function dashboardLink(): string {
+  const key = process.env.DASHBOARD_KEY;
+  if (!key) return '';
+  const base = (process.env.GATEWAY_URL || 'http://localhost:3000').replace(
+    /\/$/,
+    '',
+  );
+  return `\n🔗 View the live graph: ${base}/g/${key}`;
+}
+
 // Drop lines with no expertise signal before they ever hit the LLM.
 function isNoise(text: string, userId?: string): boolean {
   if (!text) return true;
@@ -93,7 +112,10 @@ function isNoise(text: string, userId?: string): boolean {
 function armFlush(channelId: string) {
   const prev = flushTimers.get(channelId);
   if (prev) clearTimeout(prev);
-  flushTimers.set(channelId, setTimeout(() => void flush(channelId), FLUSH_DEBOUNCE_MS));
+  flushTimers.set(
+    channelId,
+    setTimeout(() => void flush(channelId), FLUSH_DEBOUNCE_MS),
+  );
 }
 
 // Flush a channel's buffered messages to the MCP extraction tool. Each line is
@@ -109,7 +131,10 @@ async function flush(channelId: string) {
   if (!entries || entries.length === 0) return;
   buffers.set(channelId, []);
   const channel = await resolveChannelName(channelId);
-  const refs: Record<string, { ts?: string; permalink?: string; text?: string }> = {};
+  const refs: Record<
+    string,
+    { ts?: string; permalink?: string; text?: string }
+  > = {};
   const authors: Record<string, string> = {}; // display name → Slack id, for @-mentions
   const lines = entries.map((e, i) => {
     const tag = `m${i + 1}`;
@@ -117,10 +142,16 @@ async function flush(channelId: string) {
     authors[e.name] = e.userId;
     return `[${tag}] ${e.name}: ${e.text}`;
   });
-  dbg(`flushing ${entries.length} msgs from #${channel} → MCP ingest_messages`);
+  dbg(`📤 flushing ${entries.length} msgs from #${channel} → brain`);
   try {
-    const res = await mcp.ingest(lines.join('\n'), `#${channel}`, channelId, refs, authors);
-    dbg(`📥 ingested ${entries.length} msgs from #${channel}: ${res}`);
+    const res = await mcp.ingest(
+      lines.join('\n'),
+      `#${channel}`,
+      channelId,
+      refs,
+      authors,
+    );
+    dbg(`📥 ingested ${entries.length} msgs from #${channel}`);
   } catch (err) {
     console.error('[se3k:bot] ingest failed (re-queuing):', err);
     buffers.set(channelId, [...entries, ...(buffers.get(channelId) || [])]);
@@ -128,7 +159,12 @@ async function flush(channelId: string) {
 }
 
 // Buffer one message (deduped by ts), then flush by size or arm the timer.
-async function bufferMessage(channelId: string, userId: string, text: string, ts?: string) {
+async function bufferMessage(
+  channelId: string,
+  userId: string,
+  text: string,
+  ts?: string,
+) {
   if (ts) {
     const key = `${channelId}:${ts}`;
     if (processedTs.has(key)) return; // dedupe across live + backfill + re-backfill
@@ -136,16 +172,25 @@ async function bufferMessage(channelId: string, userId: string, text: string, ts
   }
   const name = await resolveUserName(userId);
   const buf = buffers.get(channelId) || [];
-  buf.push({ name, userId, text: text.replace(/\s+/g, ' ').trim(), ts, permalink: permalinkFor(channelId, ts) });
+  buf.push({
+    name,
+    userId,
+    text: text.replace(/\s+/g, ' ').trim(),
+    ts,
+    permalink: permalinkFor(channelId, ts),
+  });
   buffers.set(channelId, buf);
-  dbg(`buffered [${buf.length}] #${channelId} ${name}: ${text.slice(0, 60)}`);
+  dbg(`   ✍️  buffered [${buf.length}] ${name}: ${text.slice(0, 60)}`);
   if (buf.length >= BATCH_SIZE) await flush(channelId);
   else armFlush(channelId);
 }
 
 // Pull recent channel history (the "backfill on join" behavior).
-async function backfill(channelId: string, limit = BACKFILL_LIMIT): Promise<number> {
-  dbg(`backfill: pulling up to ${limit} msgs from ${channelId}`);
+async function backfill(
+  channelId: string,
+  limit = BACKFILL_LIMIT,
+): Promise<number> {
+  dbg(`🕓 backfill · pulling up to ${limit} msgs from ${channelId}`);
   try {
     const res = await app.client.conversations.history({
       channel: channelId,
@@ -165,7 +210,7 @@ async function backfill(channelId: string, limit = BACKFILL_LIMIT): Promise<numb
       n++;
     }
     await flush(channelId);
-    dbg(`🕓 backfilled ${n} msgs from ${channelId}`);
+    dbg(`🕓 backfill done · ${n} msgs from ${channelId}`);
     return n;
   } catch (err) {
     console.error('[se3k:bot] backfill failed:', err);
@@ -178,10 +223,10 @@ async function answer(question: string): Promise<string> {
   if (!question.trim()) {
     return 'Ask me *who actually knows about X* (expertise routing) or *why we decided X* (decision provenance). Example: `/ask-graph who do I talk to about the checkout timeouts?`';
   }
-  dbg(`answer: "${question}"`);
+  dbg(`❓ "${question}"`);
   try {
     const reply = await mcp.ask(question);
-    dbg('answer: got reply from MCP');
+    dbg('💬 got reply from brain');
     return reply;
   } catch (err) {
     console.error('[se3k:bot] ask failed:', err);
@@ -224,12 +269,14 @@ app.event('member_joined_channel', async ({ event }) => {
 
 app.command('/ask-graph', async ({ command, ack, respond }) => {
   await ack();
-  dbg(`/ask-graph from ${command.user_id}: "${command.text}"`);
+  dbg(`⌨️  /ask-graph · "${command.text}"`);
   const reply = await answer(command.text);
   // Slack hides the slash-command invocation, so echo the question back — the
   // channel only sees our reply otherwise.
   const question = command.text.trim();
-  const text = question ? `> <@${command.user_id}> asked: *${question}*\n\n${reply}` : reply;
+  const text = question
+    ? `> <@${command.user_id}> asked: *${question}*\n\n${reply}`
+    : reply;
   await respond({ text, response_type: 'in_channel' });
 });
 
@@ -246,11 +293,11 @@ app.command('/se3k-ingest', async ({ command, ack, respond }) => {
 app.command('/se3k-backfill', async ({ command, ack, respond }) => {
   await ack();
   const count = parseInt(command.text.trim(), 10) || BACKFILL_LIMIT;
-  dbg(`/se3k-backfill ${count} in ${command.channel_id}`);
+  dbg(`⌨️  /se3k-backfill ${count} in ${command.channel_id}`);
   backfilledChannels.add(command.channel_id);
   const n = await backfill(command.channel_id, count);
   await respond({
-    text: `🕓 Backfilled ${n} messages from this channel into the graph.`,
+    text: `🕓 Backfilled ${n} messages from this channel into the graph.${dashboardLink()}`,
     response_type: 'ephemeral',
   });
 });
@@ -261,11 +308,13 @@ app.event('app_mention', async ({ event, say }) => {
   // answer person-scoped questions like "what is @Rahul working on?".
   const raw = e.text || '';
   const text = (
-    botUserId ? raw.split(`<@${botUserId}>`).join(' ') : raw.replace(/^\s*<@[^>]+>/, '')
+    botUserId
+      ? raw.split(`<@${botUserId}>`).join(' ')
+      : raw.replace(/^\s*<@[^>]+>/, '')
   )
     .replace(/\s+/g, ' ')
     .trim();
-  dbg(`app_mention: "${text}"`);
+  dbg(`📣 @se3k · "${text}"`);
   const reply = await answer(text);
   await say({ text: reply, thread_ts: e.thread_ts || e.ts });
 });
@@ -276,9 +325,12 @@ app.event('app_mention', async ({ event, say }) => {
     const auth = await app.client.auth.test();
     botUserId = auth.user_id as string;
     teamUrl = auth.url as string; // e.g. https://myteam.slack.com/
-    dbg(`authed as ${botUserId} on ${teamUrl}`);
+    dbg(`🔐 authed as ${botUserId} @ ${teamUrl}`);
   } catch (err) {
-    console.error('[se3k:bot] auth.test failed (self-join detection disabled):', err);
+    console.error(
+      '[se3k:bot] auth.test failed (self-join detection disabled):',
+      err,
+    );
   }
 
   // Patch Slack user ids onto graph people by name, so even seeded/older nodes
@@ -300,10 +352,10 @@ app.event('app_mention', async ({ event, say }) => {
       userNames.set(u.id, name || u.id); // warm the name cache too
     }
     const out = await mcp.setPersonIds(ids);
-    dbg(`patched person ids from workspace: ${out}`);
+    dbg(`👥 ${out}`);
   } catch (err) {
     console.error('[se3k:bot] users.list / setPersonIds failed:', err);
   }
 
-  dbg('⚡️ SE3K bot is running in Socket Mode');
+  dbg('⚡️ SE3K bot online · Socket Mode\n');
 })();

@@ -18,7 +18,7 @@ let clientPromise: Promise<Client> | null = null;
 async function getClient(): Promise<Client> {
   if (!clientPromise) {
     clientPromise = (async () => {
-      dbg(`spawning MCP server: node ${MCP_SERVER_ENTRY}`);
+      dbg('🔌 starting SE3K brain (MCP server)…');
       const transport = new StdioClientTransport({
         command: 'node',
         args: [MCP_SERVER_ENTRY],
@@ -26,7 +26,7 @@ async function getClient(): Promise<Client> {
       });
       const client = new Client({ name: 'se3k-slack-bot', version: '0.1.0' });
       await client.connect(transport);
-      dbg('🔌 connected to SE3K MCP server');
+      dbg('🔌 connected to SE3K brain');
       return client;
     })();
   }
