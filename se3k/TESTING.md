@@ -59,9 +59,36 @@ graph — otherwise post them in step 2.
 ## 2. Seed the two conversations
 
 The full scripts (~32 human messages each, with jokes and tangents) live in
-**[`demo-conversations.txt`](./demo-conversations.txt)**. Post them **as the named
-person** (switch accounts or post from each teammate's session) — SE3K ignores the
-banter and still extracts the real story. A taste of each:
+**[`demo-conversations.txt`](./demo-conversations.txt)**.
+
+**Easiest — auto-post as the real users** (no account switching): a one-time token
+setup, then a single command posts every line as its author.
+
+1. **Add the user scope + reinstall.** `slack-bot/manifest.json` now includes a
+   `user` scope (`chat:write`) and a redirect URL — re-import it and reinstall.
+2. **Grab a token per user.** Put `SLACK_CLIENT_ID` / `SLACK_CLIENT_SECRET`
+   (app → Basic Information) in `slack-bot/.env`, then for **each** dummy account:
+   ```bash
+   cd se3k/slack-bot
+   pnpm oauth:helper          # prints an authorize link
+   ```
+   Open the link in a browser **logged in as that user**, click Allow, and copy the
+   printed `xoxp-…` token. (No-helper fallback: hit the authorize URL, copy the
+   `code` from the redirect, and exchange it via `oauth.v2.access`.)
+3. **Fill `slack-bot/seed-users.json`** (gitignored — copy `seed-users.example.json`)
+   with `"Display Name": "xoxp-…"` for each person.
+4. **Seed:**
+   ```bash
+   pnpm seed:slack --dry-run          # preview the plan, posts nothing
+   pnpm seed:slack --only backend     # seed one channel first
+   pnpm seed:slack                    # both channels, as the right people
+   ```
+   Messages appear **authored by the real users** (so the graph gets real IDs →
+   correct expertise + `@`-mentions). Seeding **only runs when you invoke it** — it's
+   never automatic.
+
+> Prefer to do it by hand? Just post the scripts **as the named person** (switch
+> accounts) — SE3K ignores the banter and still extracts the real story. A taste:
 
 `#backend` (Ivan, Sam, Adam):
 ```

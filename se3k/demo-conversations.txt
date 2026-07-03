@@ -1,95 +1,175 @@
 ========================================================================
-SE3K — DEMO CONVERSATIONS
+SE3K — DEMO CONVERSATIONS  (multi-topic, richer graph)
 ========================================================================
-Post these in your Slack sandbox as the named people, then ask SE3K the
-questions in TESTING.md. They're deliberately human (jokes, tangents, real
-problems) — SE3K ignores the chit-chat and still extracts the real story:
+Post these in your sandbox as the named people (pnpm seed:slack), then ask
+SE3K the questions at the bottom. Deliberately human — jokes and tangents —
+SE3K ignores the banter and extracts the real story: who ACTUALLY did the
+work (not who's assigned) and why each decision was made.
 
-  #backend  → the person who ACTUALLY fixed the checkout outage is IVAN,
-              not Adam (the busy "owner"). Decision: adopt PgBouncer.
-  #frontend → the person who ACTUALLY fixed the cart is RAHUL, not Adam
-              (the on-paper "owner"). Decision: ship optimistic cart updates.
-
-Channel rosters:
+Channel rosters (must match who has a token + is in the channel):
   #backend  = Ivan Sanders, Sam Okafor, Adam Reyes
   #frontend = Adam Reyes, Rahul Sharma
 
-Tip: paste a handful at a time as each user; SE3K auto-ingests (~20s), or
-run /se3k-ingest to flush immediately.
+Who's the real expert per topic (this is what the graph should surface):
+  checkout timeouts .......... Ivan        auth / sessions ....... ADAM  (not Ivan!)
+  API rate limiting .......... Ivan        cart UI ............... Rahul
+  webhook duplicates ......... Ivan        mobile layout ......... Rahul
+  DB read replicas ........... Ivan        accessibility ......... Rahul
+  (Sam only relays tickets)                dashboard perf ........ Rahul
+  (Adam owns things on paper)              design system ......... Rahul
 
 
-========================================================================
-#backend  —  "checkout keeps dying at lunch"
-========================================================================
+########################################################################
+#backend
+########################################################################
 
-Sam Okafor:    morning all ☕ my inbox is on fire, ~40 tickets came in overnight
-Sam Okafor:    customers say checkout just spins forever at peak and then times out
-Adam Reyes:    ugh, classic. I "own" checkout on paper but I'm buried in board-deck hell this week
-Adam Reyes:    Ivan can you take a look? you're basically our human debugger at this point
-Ivan Sanders:  on it — coffee first though, I refuse to debug uncaffeinated
-Sam Okafor:    bless. I'll keep the customers from rioting in the meantime
-Ivan Sanders:  ok reproduced it — hammered staging with load and checkout falls over around ~100 concurrent users
-Ivan Sanders:  watching the DB and the connections are completely maxed. we open a fresh Postgres connection per request 🙃
-Sam Okafor:    is that bad? (asking for a non-engineer friend. the friend is me)
-Ivan Sanders:  it's like everyone bringing their own chair to a meeting instead of using the ones already in the room — we run out
-Adam Reyes:    lol. so pool exhaustion basically?
-Ivan Sanders:  yep. it's always the connection pool. the DNS of backend bugs
-Sam Okafor:    heads up, BigCo just escalated — their checkout was down ~6 min at lunch peak
-Ivan Sanders:  that tracks. lunch peak = max concurrency = pool empty = everything waits
-Adam Reyes:    ok this is real revenue now. what's the fix
-Ivan Sanders:  put a connection pooler in front — PgBouncer — so we reuse connections instead of one-per-request
-Ivan Sanders:  spinning it up on staging now, brb
-Adam Reyes:    concern: that's one more piece of infra to run and monitor. we're tiny, I don't love more moving parts
-Ivan Sanders:  fair, but the alternative is checkout dying every lunch. I'll wire up alerts so it's not a black box
-Sam Okafor:    for what it's worth I vote strongly for "checkout stops dying"
-Ivan Sanders:  😄 deploying to staging…
-Ivan Sanders:  results are in: checkout p95 went from 9s to 700ms under the exact same load. night and day
-Sam Okafor:    🎉 700ms I can sell to customers. 9 seconds I cannot
-Adam Reyes:    ok that's a massive win, ship it
-Ivan Sanders:  final call then — we keep PgBouncer. I'll add pool + latency dashboards and a pager alert. pool exhaustion was the real outage cause
-Adam Reyes:    👍 approved. thank you for saving my quarter genuinely
-Ivan Sanders:  shipped to prod 🚀 watching the graphs now
-Sam Okafor:    tickets are already slowing down, you're a wizard
-Ivan Sanders:  it's just chairs in a room Sam 🪑
-Adam Reyes:    someone please put "it's always the connection pool" on a mug
-Sam Okafor:    adding it to the merch backlog right after I close these 40 tickets
-Ivan Sanders:  monitoring's green, p95 holding at ~700ms through peak. calling it. going for more coffee ☕
+# --- topic: checkout timeouts → PgBouncer ---------------------------
+Sam Okafor:    morning ☕ inbox is on fire, ~40 tickets overnight about checkout
+Sam Okafor:    customers say checkout just spins at peak and times out
+Adam Reyes:    ugh. I "own" checkout on paper but I'm buried in board-deck hell — Ivan can you dig in?
+Ivan Sanders:  on it, coffee first, I do not debug uncaffeinated
+Ivan Sanders:  reproduced on staging — falls over around ~100 concurrent users
+Ivan Sanders:  root cause: we open a fresh Postgres connection per request, the pool maxes out 🙃
+Adam Reyes:    so… pool exhaustion?
+Ivan Sanders:  yep. it's always the connection pool, the DNS of backend bugs
+Sam Okafor:    BigCo just escalated, they were down ~6 min at lunch peak
+Ivan Sanders:  fix: PgBouncer in front so we reuse connections. deploying to staging
+Adam Reyes:    concern: that's one more piece of infra to run and monitor, we're tiny
+Ivan Sanders:  fair, but the alternative is checkout dying every lunch. I'll add alerts
+Ivan Sanders:  results: checkout p95 went 9s → 700ms under the same load 🎉
+Adam Reyes:    massive. ship it
+Ivan Sanders:  final call: keep PgBouncer, I'll add pool + latency dashboards and a pager alert
+Sam Okafor:    tickets already dropping, you're a wizard 🪄
+
+# --- topic: API rate limiting / abuse ------------------------------
+Sam Okafor:    heads up, a few customers report 429s during normal use, and one org is clearly hammering the API
+Ivan Sanders:  yeah someone's scraping us. we have no real rate limiting, just a dumb per-minute counter
+Ivan Sanders:  building a proper token-bucket limiter, per API key
+Adam Reyes:    where do we store the buckets? if it's in-process each pod has its own counts
+Ivan Sanders:  right, per-pod would drift. I'll back it with Redis so limits are global
+Adam Reyes:    concern: that adds a Redis round-trip on every request, latency
+Ivan Sanders:  measured it — sub-millisecond with pipelining, worth it for correct limits
+Ivan Sanders:  shipped the Redis token-bucket, abusive org is now capped and legit users stopped seeing 429s
+Sam Okafor:    confirmed, the false-429 tickets stopped
+Ivan Sanders:  final call: Redis-backed token bucket, 1000 req/min default, per-key overrides
+Adam Reyes:    nice, approved
+
+# --- topic: duplicate webhook deliveries ---------------------------
+Sam Okafor:    a partner says they're getting each event twice and it's double-charging their side 😬
+Ivan Sanders:  oof. our webhook sender retries on timeout but doesn't dedupe, so slow receivers get dupes
+Ivan Sanders:  adding an idempotency key per event so receivers can drop repeats
+Adam Reyes:    do we also need to fix the retry logic itself?
+Ivan Sanders:  the retry is fine, the receiver just needs a stable key. I'll document it for partners
+Ivan Sanders:  shipped idempotency keys + a dedupe window on our side too
+Sam Okafor:    partner confirmed the double-charges stopped, crisis averted
+Ivan Sanders:  final call: idempotency-key header on every webhook, 24h dedupe window
+
+# --- topic: auth / session expiry  (ADAM is the expert here) -------
+Sam Okafor:    getting a wave of "I keep getting logged out" complaints, mostly mobile
+Adam Reyes:    that one's mine, I wrote the session layer originally. let me look
+Adam Reyes:    found it — our JWTs expire at exactly 1h with no refresh, so mid-task people get booted
+Adam Reyes:    the mobile app doesn't silently refresh either, so it just dumps you to login
+Ivan Sanders:  want me to take it? I'm mid-webhooks though
+Adam Reyes:    nah I've got this one, it's my mess. adding a sliding refresh + refresh tokens
+Adam Reyes:    shipped — sessions now refresh in the background, you stay logged in while active
+Sam Okafor:    logout complaints basically gone, thank you
+Adam Reyes:    final call: sliding 1h access token + 30-day refresh token, rotate on use
+
+# --- topic: DB load / read replicas --------------------------------
+Ivan Sanders:  our primary Postgres is hitting 90% CPU at peak, all the read traffic is hammering it
+Sam Okafor:    is that why the dashboard feels slow for big accounts?
+Ivan Sanders:  yep, heavy read queries competing with writes. I want to add read replicas and route reads there
+Adam Reyes:    concern: replicas cost money and add replication lag, will reports be stale?
+Ivan Sanders:  lag is ~200ms, fine for dashboards. I'll keep checkout reads on the primary to be safe
+Ivan Sanders:  set up two read replicas + a router, primary CPU dropped from 90% to ~40% at peak
+Adam Reyes:    ok the cost is justified. approved
+Ivan Sanders:  final call: 2 read replicas, dashboards/reports read from replicas, checkout stays on primary
 
 
-========================================================================
-#frontend  —  "the cart runs on a potato"
-========================================================================
+########################################################################
+#frontend
+########################################################################
 
-Adam Reyes:    Rahul, real talk, our cart page feels like it's running on a potato
-Adam Reyes:    I'm technically the frontend "owner" but I haven't opened that code since like March
-Rahul Sharma:  haha yeah the cart is currently held together with hope and z-index
-Adam Reyes:    users are bouncing right at the cart step, we're leaking conversions
-Rahul Sharma:  lemme dig in. is it the classic "add to cart, wait a full second, question your life choices" flow?
-Adam Reyes:    that is EXACTLY it
-Rahul Sharma:  found it — every time you add an item it re-fetches the entire basket from the server before touching the UI
-Rahul Sharma:  so the whole page just freezes for about a second while it waits. absolutely brutal on mobile
-Adam Reyes:    oof, why did we build it that way
-Rahul Sharma:  past us thought "always trust the server", very noble, also terrible UX
-Rahul Sharma:  gonna make it optimistic — update the UI instantly, reconcile with the server in the background
-Adam Reyes:    ok concern though: if the server call quietly fails, won't the cart show the wrong item count? feels risky right before checkout
-Rahul Sharma:  valid. I'll add a rollback — if the reconcile fails we revert the count and pop a little "hmm, try again" toast
-Adam Reyes:    ok I can live with that
-Rahul Sharma:  also lol the quantity stepper fires a network request on EVERY click — tap +5 fast and we basically DDoS ourselves
-Adam Reyes:    we invented our own load test, incredible work team
-Rahul Sharma:  debouncing it — one request after you stop clicking instead of five
-Rahul Sharma:  important design question: light toast or dark toast
-Adam Reyes:    dark. we're a serious company. mostly.
-Rahul Sharma:  rewrote add-to-cart to be optimistic and the freeze is completely gone, it feels instant now
-Rahul Sharma:  stepper is debounced + batched too, no more self-inflicted DDoS
-Adam Reyes:    just clicked around staging — night and day, this actually feels like a real store now
-Rahul Sharma:  I live for that "oh it's actually fast" moment tbh
-Adam Reyes:    remind me how we handle the fail case? want to be sure we're not lying to customers about their cart
-Rahul Sharma:  optimistic update → background reconcile → on failure roll back the count, retry once, show the toast. the cart never silently lies
-Adam Reyes:    perfect. final call: ship the optimistic cart with the rollback toast + retry
-Rahul Sharma:  shipping it 🚀
-Rahul Sharma:  deployed — cart interactions are basically instant, and I added a tiny loading shimmer so it feels intentional not broken
-Adam Reyes:    conversions dashboard is already ticking up, you're carrying the frontend fr
-Rahul Sharma:  someone's gotta 😌 (please do not make me touch the checkout CSS though)
-Adam Reyes:    no promises, that's next sprint's horror movie
-Rahul Sharma:  adding "therapy" to the sprint budget then
-Adam Reyes:    approved, easily our best-justified line item
+# --- topic: cart abandonment → optimistic UI -----------------------
+Adam Reyes:    Rahul, our cart page feels like it's running on a potato and users bounce right there
+Adam Reyes:    I "own" the frontend on paper but I haven't opened that code since March
+Rahul Sharma:  haha the cart is held together with hope and z-index. lemme dig in
+Rahul Sharma:  found it — it re-fetches the entire basket on every add, so the UI freezes for ~1s
+Adam Reyes:    oof, why
+Rahul Sharma:  past us thought "always trust the server", noble, also terrible UX. making it optimistic
+Adam Reyes:    concern: if the server call quietly fails, won't the cart show the wrong count?
+Rahul Sharma:  valid, I'll add a rollback + a "hmm, try again" toast on failure
+Rahul Sharma:  also the quantity stepper fires a request per click, tap +5 fast and we DDoS ourselves 😂
+Adam Reyes:    we invented our own load test, incredible
+Rahul Sharma:  debounced it. rewrote add-to-cart optimistically, freeze is gone, feels instant
+Adam Reyes:    just clicked around staging, night and day
+Rahul Sharma:  final call: optimistic cart updates with rollback toast + retry on failure
+
+# --- topic: mobile layout breakage ---------------------------------
+Adam Reyes:    screenshots from a customer on a small Android — our product grid is completely broken, cards overlapping
+Rahul Sharma:  yeah our layout uses fixed pixel breakpoints from like 2019, small screens fall through the cracks
+Rahul Sharma:  moving the grid to CSS grid with container queries so it adapts to the actual container, not the viewport
+Adam Reyes:    will that work on older phones?
+Rahul Sharma:  container queries are supported everywhere we care about now, I checked our analytics
+Rahul Sharma:  shipped — grid reflows cleanly from 320px up, no more overlap
+Adam Reyes:    looks great on my old test phone
+Rahul Sharma:  final call: container-query based responsive grid, drop the old fixed breakpoints
+
+# --- topic: accessibility audit ------------------------------------
+Adam Reyes:    we got a complaint that a screen-reader user can't complete checkout, that's bad and also legal risk
+Rahul Sharma:  I'll run an a11y audit. off the top: our buttons are divs, contrast is too low, and focus order is chaos
+Rahul Sharma:  fixing: real button elements, ARIA labels, visible focus rings, and a proper tab order
+Adam Reyes:    fully support this, take the time you need
+Rahul Sharma:  contrast now passes AA, keyboard-only checkout works end to end, added skip-to-content
+Rahul Sharma:  also added an axe-core check to CI so we don't regress
+Adam Reyes:    love the CI check
+Rahul Sharma:  final call: WCAG AA target, axe-core gate in CI, keyboard + screen-reader tested
+
+# --- topic: dashboard performance / virtualization -----------------
+Adam Reyes:    the analytics dashboard takes like 8 seconds to load for our biggest account
+Rahul Sharma:  they have ~10k rows and we render every single one into the DOM at once. browser cries
+Rahul Sharma:  virtualizing the list so we only render what's on screen
+Adam Reyes:    concern: virtualization can get janky with variable row heights, and it's more complex
+Rahul Sharma:  true, I'll measure rows and keep a fallback. complexity is worth it at 10k rows
+Rahul Sharma:  shipped — dashboard first paint went 8s → under 1s for the big account
+Adam Reyes:    huge. that account was our loudest complainer
+Rahul Sharma:  final call: virtualize any list over 200 rows, measured heights
+
+# --- topic: design system / component library ----------------------
+Rahul Sharma:  every page reinvents buttons and inputs, we have like 6 different button styles, it's chaos
+Adam Reyes:    yeah it looks inconsistent. but building a whole design system is a big time sink
+Rahul Sharma:  I'll start small — extract Button, Input, Modal into a shared package, migrate pages gradually
+Adam Reyes:    concern: don't let it become a 3-month yak-shave, timebox it
+Rahul Sharma:  agreed, one week to the core three + docs, migrate opportunistically after
+Rahul Sharma:  shipped the shared component lib, migrated checkout + cart, already killed 4 duplicate button styles
+Adam Reyes:    the consistency is really noticeable
+Rahul Sharma:  final call: shared component library, core primitives first, migrate page-by-page
+
+
+########################################################################
+QUESTIONS TO ASK  (after ingestion)
+########################################################################
+
+Expertise routing (who ACTUALLY knows — not who's assigned):
+  /ask-graph who do I talk to about the checkout timeouts?      → Ivan
+  /ask-graph who knows the API rate limiting?                   → Ivan
+  /ask-graph who should I ask about auth / sessions?            → ADAM  (great: not Ivan)
+  /ask-graph who knows the cart UI?                             → Rahul
+  /ask-graph who knows about accessibility?                     → Rahul
+
+Decision provenance (reasoning + dissent, not just the outcome):
+  /ask-graph why did we adopt PgBouncer?                        → Adam's concern + Ivan's call
+  /ask-graph why did we use a Redis-backed rate limiter?        → Adam's latency concern + Ivan's call
+  /ask-graph why did we virtualize the dashboard list?          → Adam's complexity concern + Rahul's call
+  /ask-graph why did we ship optimistic cart updates?          → Adam's wrong-count concern + Rahul's call
+
+Person status (only that person's work):
+  @se3k what is @Ivan Sanders working on?                       → checkout, rate limiting, webhooks, DB replicas
+  @se3k what is @Rahul Sharma working on?                       → cart, mobile, a11y, dashboard, design system
+  @se3k what is @Adam Reyes working on?                         → auth/sessions (owner elsewhere)
+
+Team overview:
+  /ask-graph give me an update of who is doing what             → per-project digest across both channels
+
+Honest "I don't know":
+  /ask-graph who owns the mobile app?                           → says it has no signal (doesn't invent)
