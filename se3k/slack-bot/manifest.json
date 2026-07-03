@@ -30,6 +30,7 @@
     ]
   },
   "oauth_config": {
+    "redirect_urls": ["http://localhost:3030/callback"],
     "scopes": {
       "bot": [
         "app_mentions:read",
@@ -39,7 +40,8 @@
         "chat:write",
         "commands",
         "users:read"
-      ]
+      ],
+      "user": ["chat:write"]
     }
   },
   "settings": {
