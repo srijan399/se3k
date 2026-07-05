@@ -1,4 +1,5 @@
 import 'dotenv/config';
+import http from 'node:http';
 import { App, LogLevel } from '@slack/bolt';
 import type { WebClient } from '@slack/web-api';
 import { mcp } from './mcpClient';
@@ -18,9 +19,22 @@ const dbg = (...args: unknown[]) => console.log('[se3k:bot]', ...args);
 
 const { SLACK_APP_TOKEN, SLACK_SIGNING_SECRET } = process.env;
 
-if (!SLACK_APP_TOKEN || !SLACK_SIGNING_SECRET) {
-  throw new Error(
-    'Missing one or more required env vars: SLACK_APP_TOKEN, SLACK_SIGNING_SECRET',
+// ---- Env check --------------------------------------------------------------
+// Fail fast and loud on boot rather than dying later on the first Slack event —
+// on Render a missing-env crash loop is much easier to diagnose from the boot
+// log than from a silent runtime failure.
+const REQUIRED_ENV = ['SLACK_APP_TOKEN', 'SLACK_SIGNING_SECRET'] as const;
+const RECOMMENDED_ENV = ['MCP_SERVER_URL', 'INTERNAL_API_SECRET'] as const;
+
+const missingRequired = REQUIRED_ENV.filter((k) => !process.env[k]);
+if (missingRequired.length > 0) {
+  throw new Error(`Missing required env var(s): ${missingRequired.join(', ')}`);
+}
+const missingRecommended = RECOMMENDED_ENV.filter((k) => !process.env[k]);
+if (missingRecommended.length > 0) {
+  console.warn(
+    `[se3k:bot] ⚠️  missing recommended env var(s): ${missingRecommended.join(', ')} — ` +
+      'falling back to defaults / degraded behavior',
   );
 }
 
@@ -493,7 +507,27 @@ app.event('app_mention', async ({
   await say({ text: reply, thread_ts: e.thread_ts || e.ts });
 });
 
+// ---- Health endpoint --------------------------------------------------------
+// The bot itself talks to Slack over Socket Mode (outbound only), so it has no
+// inbound HTTP surface of its own. Render's web-service health check still
+// expects something listening on $PORT — without this, deploys get stuck
+// "waiting for open port" and restart-loop. This server exists only to
+// satisfy that check.
+const PORT = Number(process.env.PORT) || 3001;
+const healthServer = http.createServer((req, res) => {
+  if (req.url === '/health' || req.url === '/') {
+    res.writeHead(200, { 'Content-Type': 'application/json' });
+    res.end(JSON.stringify({ status: 'ok' }));
+    return;
+  }
+  res.writeHead(404);
+  res.end();
+});
+
 (async () => {
+  healthServer.listen(PORT, () => {
+    dbg(`🩺 health check listening on :${PORT}`);
+  });
   await app.start();
   dbg('⚡️ SE3K bot online · Socket Mode · multi-workspace\n');
 })();

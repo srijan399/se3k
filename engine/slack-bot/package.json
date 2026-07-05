@@ -6,6 +6,8 @@
   "scripts": {
     "test": "echo \"Error: no test specified\" && exit 1",
     "dev": "ts-node src/index.ts",
+    "build": "tsc",
+    "start": "node dist/index.js",
     "seed:slack": "ts-node src/seedSlack.ts",
     "oauth:helper": "ts-node src/oauthHelper.ts"
   },
