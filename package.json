@@ -5,7 +5,7 @@
   "description": "SE3K. Root helpers to install and run every package (mcp-server, slack-bot, web).",
   "scripts": {
     "install": "pnpm -C engine/mcp-server install && pnpm -C engine/slack-bot install && pnpm -C web install",
-    "build": "pnpm -C engine/mcp-server build",
+    "build:mcp": "pnpm -C engine/mcp-server build",
     "setup": "pnpm run install && pnpm run build",
     "dev:bot": "pnpm -C engine/slack-bot dev",
     "dev:web": "pnpm -C web dev",
