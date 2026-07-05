@@ -8,6 +8,7 @@
     "build": "pnpm -C se3k/mcp-server build",
     "setup": "pnpm run install && pnpm run build",
     "dev:bot": "pnpm -C se3k/slack-bot dev",
-    "dev:web": "pnpm -C web dev"
+    "dev:web": "pnpm -C web dev",
+    "build:web": "pnpm -C web build"
   }
 }

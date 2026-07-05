@@ -31,6 +31,7 @@
   },
   "oauth_config": {
     "redirect_urls": [
+      "https://se3k.vercel.app/api/slack/oauth/callback",
       "http://localhost:3030/callback",
       "http://localhost:3000/api/slack/oauth/callback"
     ],
