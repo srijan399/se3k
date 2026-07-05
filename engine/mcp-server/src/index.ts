@@ -12,6 +12,13 @@ const dbg = (...args: unknown[]) => console.error('[se3k:mcp]', ...args);
 
 const app = express();
 app.use(express.json());
+
+// Unauthenticated — Render's health check has no way to send the internal
+// secret, so this must be registered before requireInternalSecret below.
+app.get('/health', (_req: Request, res: Response) => {
+  res.status(200).json({ status: 'ok' });
+});
+
 app.use(requireInternalSecret);
 
 // Session-managed Streamable HTTP (the standard MCP SDK pattern — see
@@ -94,7 +101,9 @@ app.use((err: unknown, _req: Request, res: Response, _next: NextFunction) => {
   }
 });
 
-const PORT = Number(process.env.MCP_PORT) || 4000;
+// Render assigns and scans for $PORT; MCP_PORT is kept as the local-dev name
+// (matches slack-bot's MCP_SERVER_URL default) so existing .env files still work.
+const PORT = Number(process.env.PORT || process.env.MCP_PORT) || 4000;
 app.listen(PORT, () => {
   dbg(`🧠 SE3K brain online · HTTP :${PORT} (MCP over Streamable HTTP + REST)`);
 });
