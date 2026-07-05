@@ -3,3 +3,10 @@
 *.env
 *.env.local
 node_modules
+
+# Compiled output — the MCP server is built from src/ before it runs
+# (`pnpm run build` / `node dist/index.js`). Don't track it; it just causes
+# diff noise when src is committed without a matching rebuild.
+dist/
+
+/pnpm-lock.yaml
