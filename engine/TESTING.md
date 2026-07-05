@@ -31,12 +31,12 @@ with a link to the exact message as proof.
 
 ```bash
 # Terminal 1 — the brain (must be built; the bot spawns dist/)
-cd se3k/mcp-server
+cd engine/mcp-server
 cp .env.example .env          # ensure GROQ_API_KEY is set for live extraction
 pnpm install && pnpm build
 
 # Terminal 2 — the Slack bot (needs SLACK_* tokens in slack-bot/.env)
-cd se3k/slack-bot
+cd engine/slack-bot
 pnpm install && pnpm dev      # → "⚡️ SE3K bot is running in Socket Mode"
 
 # Terminal 3 — the dashboard
@@ -69,7 +69,7 @@ setup, then a single command posts every line as its author.
 2. **Grab a token per user.** Put `SLACK_CLIENT_ID` / `SLACK_CLIENT_SECRET`
    (app → Basic Information) in `slack-bot/.env`, then for **each** dummy account:
    ```bash
-   cd se3k/slack-bot
+   cd engine/slack-bot
    pnpm oauth:helper          # prints an authorize link
    ```
    Open the link in a browser **logged in as that user**, click Allow, and copy the

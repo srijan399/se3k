@@ -3,6 +3,19 @@ import { App, LogLevel } from '@slack/bolt';
 import type { WebClient } from '@slack/web-api';
 import { mcp } from './mcpClient';
 
+// @slack/bolt's own middleware-arg types (SlackEventMiddlewareArgs etc.) don't
+// resolve cleanly through this install's rewritten .d.ts re-exports, so these
+// are typed by hand for exactly the fields each handler destructures —
+// consistent with how the rest of this file already treats Slack payloads
+// (manual `as {...}` casts rather than depending on upstream event types).
+interface BoltContext {
+  teamId?: string;
+  botUserId?: string;
+}
+type Ack = () => Promise<void>;
+type Respond = (msg: { text: string; response_type?: string }) => Promise<unknown>;
+type Say = (msg: { text: string; thread_ts?: string }) => Promise<unknown>;
+
 const dbg = (...args: unknown[]) => console.log('[se3k:bot]', ...args);
 
 const { SLACK_APP_TOKEN, SLACK_SIGNING_SECRET } = process.env;
@@ -57,7 +70,7 @@ const app = new App({
   signingSecret: SLACK_SIGNING_SECRET,
   socketMode: true,
   logLevel: LogLevel.INFO,
-  authorize: async ({ teamId }) => {
+  authorize: async ({ teamId }: { teamId?: string }) => {
     if (!teamId) throw new Error('authorize called without a teamId');
     const install = await fetchInstallation(teamId);
     return {
@@ -358,7 +371,15 @@ async function answer(teamId: string, question: string): Promise<string> {
 
 // ---- Events ----------------------------------------------------------------
 
-app.message(async ({ message, context, client }) => {
+app.message(async ({
+  message,
+  context,
+  client,
+}: {
+  message: unknown;
+  context: BoltContext;
+  client: WebClient;
+}) => {
   const teamId = context.teamId;
   if (!teamId) return;
   const m = message as {
@@ -385,7 +406,15 @@ app.message(async ({ message, context, client }) => {
   await bufferMessage(client, teamId, m.channel, m.user, m.text, m.ts);
 });
 
-app.event('member_joined_channel', async ({ event, context, client }) => {
+app.event('member_joined_channel', async ({
+  event,
+  context,
+  client,
+}: {
+  event: unknown;
+  context: BoltContext;
+  client: WebClient;
+}) => {
   const teamId = context.teamId;
   if (!teamId) return;
   const e = event as { user?: string; channel?: string };
@@ -398,7 +427,19 @@ app.event('member_joined_channel', async ({ event, context, client }) => {
   await backfill(client, teamId, e.channel);
 });
 
-app.command('/ask-graph', async ({ command, ack, respond, context, client }) => {
+app.command('/ask-graph', async ({
+  command,
+  ack,
+  respond,
+  context,
+  client,
+}: {
+  command: { text: string; user_id: string; channel_id: string };
+  ack: Ack;
+  respond: Respond;
+  context: BoltContext;
+  client: WebClient;
+}) => {
   await ack();
   const teamId = context.teamId!;
   void ensureBootstrapped(client, teamId);
@@ -413,7 +454,19 @@ app.command('/ask-graph', async ({ command, ack, respond, context, client }) => 
   await respond({ text, response_type: 'in_channel' });
 });
 
-app.command('/se3k-ingest', async ({ command, ack, respond, context, client }) => {
+app.command('/se3k-ingest', async ({
+  command,
+  ack,
+  respond,
+  context,
+  client,
+}: {
+  command: { channel_id: string };
+  ack: Ack;
+  respond: Respond;
+  context: BoltContext;
+  client: WebClient;
+}) => {
   await ack();
   const teamId = context.teamId!;
   dbg(`/se3k-ingest · team ${teamId} · ${command.channel_id}`);
@@ -424,7 +477,19 @@ app.command('/se3k-ingest', async ({ command, ack, respond, context, client }) =
   });
 });
 
-app.command('/se3k-backfill', async ({ command, ack, respond, context, client }) => {
+app.command('/se3k-backfill', async ({
+  command,
+  ack,
+  respond,
+  context,
+  client,
+}: {
+  command: { text: string; channel_id: string };
+  ack: Ack;
+  respond: Respond;
+  context: BoltContext;
+  client: WebClient;
+}) => {
   await ack();
   const teamId = context.teamId!;
   const count = parseInt(command.text.trim(), 10) || BACKFILL_LIMIT;
@@ -437,7 +502,17 @@ app.command('/se3k-backfill', async ({ command, ack, respond, context, client })
   });
 });
 
-app.event('app_mention', async ({ event, say, context, client }) => {
+app.event('app_mention', async ({
+  event,
+  say,
+  context,
+  client,
+}: {
+  event: unknown;
+  say: Say;
+  context: BoltContext;
+  client: WebClient;
+}) => {
   const teamId = context.teamId;
   if (!teamId) return;
   void ensureBootstrapped(client, teamId);
