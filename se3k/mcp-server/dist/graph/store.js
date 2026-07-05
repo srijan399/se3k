@@ -1,59 +1,66 @@
 "use strict";
-var __createBinding = (this && this.__createBinding) || (Object.create ? (function(o, m, k, k2) {
-    if (k2 === undefined) k2 = k;
-    var desc = Object.getOwnPropertyDescriptor(m, k);
-    if (!desc || ("get" in desc ? !m.__esModule : desc.writable || desc.configurable)) {
-      desc = { enumerable: true, get: function() { return m[k]; } };
-    }
-    Object.defineProperty(o, k2, desc);
-}) : (function(o, m, k, k2) {
-    if (k2 === undefined) k2 = k;
-    o[k2] = m[k];
-}));
-var __setModuleDefault = (this && this.__setModuleDefault) || (Object.create ? (function(o, v) {
-    Object.defineProperty(o, "default", { enumerable: true, value: v });
-}) : function(o, v) {
-    o["default"] = v;
-});
-var __importStar = (this && this.__importStar) || (function () {
-    var ownKeys = function(o) {
-        ownKeys = Object.getOwnPropertyNames || function (o) {
-            var ar = [];
-            for (var k in o) if (Object.prototype.hasOwnProperty.call(o, k)) ar[ar.length] = k;
-            return ar;
-        };
-        return ownKeys(o);
-    };
-    return function (mod) {
-        if (mod && mod.__esModule) return mod;
-        var result = {};
-        if (mod != null) for (var k = ownKeys(mod), i = 0; i < k.length; i++) if (k[i] !== "default") __createBinding(result, mod, k[i]);
-        __setModuleDefault(result, mod);
-        return result;
-    };
-})();
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.GraphStore = void 0;
-const fs = __importStar(require("fs"));
-const path = __importStar(require("path"));
-// STDOUT is the MCP JSON-RPC transport — debug goes to stderr only.
+const drizzle_orm_1 = require("drizzle-orm");
+const client_1 = require("../db/client");
+const schema_1 = require("../db/schema");
 const dbg = (...args) => console.error('[se3k:store]', ...args);
-// The graph JSON lives one level up from the built server, alongside the repo's
-// graph-store/ directory (shared with the Next.js dashboard).
-const DEFAULT_PATH = path.resolve(__dirname, '../../../graph-store/graph.json');
-// The LLM may return a message ref as "[m3]", "m3", or " m3 " — normalize both
-// forms before looking it up in the bot-supplied refs map.
+function rowToNode(r) {
+    return {
+        id: r.id,
+        type: r.type,
+        label: r.label,
+        slackUserId: r.slackUserId ?? undefined,
+        meta: r.meta ?? undefined,
+    };
+}
+function nodeToRow(teamId, n) {
+    return {
+        teamId,
+        id: n.id,
+        type: n.type,
+        label: n.label,
+        slackUserId: n.slackUserId ?? null,
+        meta: n.meta ?? null,
+    };
+}
+function rowToEdge(r) {
+    return {
+        id: r.id,
+        type: r.type,
+        from: r.from,
+        to: r.to,
+        weight: r.weight,
+        last_active: r.lastActive,
+        sources: r.sources || [],
+        meta: r.meta ?? undefined,
+    };
+}
+function edgeToRow(teamId, e) {
+    return {
+        teamId,
+        id: e.id,
+        type: e.type,
+        from: e.from,
+        to: e.to,
+        weight: e.weight,
+        lastActive: e.last_active,
+        sources: e.sources,
+        meta: e.meta ?? null,
+    };
+}
 function lookupRef(refs, r) {
     if (!refs || !r)
         return undefined;
     return refs[r] || refs[r.replace(/[^a-z0-9]/gi, '')];
 }
 function tokens(s) {
-    return new Set(s.toLowerCase().replace(/[^a-z0-9 ]/g, ' ').split(/\s+/).filter((w) => w.length > 2));
+    return new Set(s
+        .toLowerCase()
+        .replace(/[^a-z0-9 ]/g, ' ')
+        .split(/\s+/)
+        .filter((w) => w.length > 2));
 }
-// Fallback when the LLM omits/mis-tags `ref`: find the source message whose text
-// best contains the extracted evidence quote, so citations still get a real ts +
-// permalink. Returns undefined if nothing overlaps enough.
 function bestRefByText(refs, evidence) {
     if (!refs || !evidence)
         return undefined;
@@ -86,38 +93,43 @@ function slug(s) {
         .replace(/[^a-z0-9]+/g, '-')
         .replace(/^-+|-+$/g, '');
 }
-// In-memory graph, JSON-persisted. Single source of truth for the whole system:
-// the MCP tools mutate it, the Slack bot queries it (via MCP), and the dashboard
-// reads the persisted snapshot.
-// hackathon shortcut: a JSON file is plenty; SQLite/Neo4j only if we ever needed
-// concurrent writers, which a demo does not.
 class GraphStore {
-    constructor(filePath = process.env.GRAPH_STORE_PATH || DEFAULT_PATH) {
+    constructor(teamId) {
         this.nodes = new Map();
         this.edges = new Map();
-        this.filePath = filePath;
-        this.load();
+        this.teamId = teamId;
     }
-    // ---------- persistence ----------
-    load() {
-        try {
-            if (!fs.existsSync(this.filePath))
-                return;
-            const raw = JSON.parse(fs.readFileSync(this.filePath, 'utf-8'));
-            this.nodes = new Map((raw.nodes || []).map((n) => [n.id, n]));
-            this.edges = new Map((raw.edges || []).map((e) => [e.id, e]));
-            dbg(`📂 loaded ${this.nodes.size} nodes · ${this.edges.size} edges`);
-        }
-        catch (err) {
-            dbg('load failed (starting empty):', err);
-        }
+    // Hydrate a team's graph from Postgres. Every MCP tool / REST handler gets
+    // its own short-lived store per call — workspace-sized graphs are cheap to
+    // load in full, so there's no cross-call cache to invalidate.
+    static async forTeam(teamId) {
+        const store = new GraphStore(teamId);
+        await store.hydrate();
+        return store;
     }
-    save() {
-        const dir = path.dirname(this.filePath);
-        if (!fs.existsSync(dir))
-            fs.mkdirSync(dir, { recursive: true });
-        fs.writeFileSync(this.filePath, JSON.stringify(this.snapshot(), null, 2));
-        dbg(`💾 saved ${this.nodes.size} nodes · ${this.edges.size} edges`);
+    async hydrate() {
+        const [nodeRows, edgeRows] = await Promise.all([
+            client_1.db.select().from(schema_1.graphNodes).where((0, drizzle_orm_1.eq)(schema_1.graphNodes.teamId, this.teamId)),
+            client_1.db.select().from(schema_1.graphEdges).where((0, drizzle_orm_1.eq)(schema_1.graphEdges.teamId, this.teamId)),
+        ]);
+        this.nodes = new Map(nodeRows.map((r) => [r.id, rowToNode(r)]));
+        this.edges = new Map(edgeRows.map((r) => [r.id, rowToEdge(r)]));
+        dbg(`📂 loaded ${this.nodes.size} nodes · ${this.edges.size} edges (team ${this.teamId})`);
+    }
+    // Full-snapshot overwrite of this team's rows — mirrors the old JSON
+    // file's "write the whole graph" semantics, just against Postgres.
+    async saveTeam() {
+        const nodeRows = [...this.nodes.values()].map((n) => nodeToRow(this.teamId, n));
+        const edgeRows = [...this.edges.values()].map((e) => edgeToRow(this.teamId, e));
+        await client_1.db.transaction(async (tx) => {
+            await tx.delete(schema_1.graphNodes).where((0, drizzle_orm_1.eq)(schema_1.graphNodes.teamId, this.teamId));
+            await tx.delete(schema_1.graphEdges).where((0, drizzle_orm_1.eq)(schema_1.graphEdges.teamId, this.teamId));
+            if (nodeRows.length)
+                await tx.insert(schema_1.graphNodes).values(nodeRows);
+            if (edgeRows.length)
+                await tx.insert(schema_1.graphEdges).values(edgeRows);
+        });
+        dbg(`💾 saved ${this.nodes.size} nodes · ${this.edges.size} edges (team ${this.teamId})`);
     }
     snapshot() {
         return {
@@ -131,9 +143,6 @@ class GraphStore {
         this.edges.clear();
         dbg('🧹 cleared graph');
     }
-    // Cheap content signature that changes iff the graph changed (unlike
-    // snapshot().updatedAt, which changes on every read). Used by the semantic
-    // answer cache to invalidate entries when the graph mutates.
     version() {
         let h = 0;
         for (const e of this.edges.values()) {
@@ -143,9 +152,6 @@ class GraphStore {
         }
         return `${this.nodes.size}:${this.edges.size}:${h >>> 0}`;
     }
-    // ---------- node helpers (with entity resolution) ----------
-    // Resolve a person by Slack user id first (most reliable), then by normalized
-    // name; create the node only if neither matches. Backfills a missing id.
     upsertPerson(name, slackUserId) {
         let existing;
         if (slackUserId) {
@@ -196,7 +202,12 @@ class GraphStore {
         const existing = this.nodes.get(id);
         if (existing)
             return existing;
-        const node = { id, type: 'Channel', label: name, meta: { channelId } };
+        const node = {
+            id,
+            type: 'Channel',
+            label: name,
+            meta: { channelId },
+        };
         this.nodes.set(id, node);
         return node;
     }
@@ -207,10 +218,7 @@ class GraphStore {
     label(id) {
         return this.nodes.get(id)?.label ?? id;
     }
-    // Backfill Slack user ids onto existing Person nodes by name (from the bot's
-    // workspace lookup), so seeded/older people become @-mentionable. Only fills
-    // missing ids — never overwrites one set during live ingestion.
-    setPersonIds(ids) {
+    async setPersonIds(ids) {
         const bySlug = new Map();
         for (const [name, id] of Object.entries(ids))
             if (name && id)
@@ -226,12 +234,9 @@ class GraphStore {
             }
         }
         if (n)
-            this.save();
+            await this.saveTeam();
         return n;
     }
-    // ---------- edge helpers ----------
-    // Merge an INVOLVED_IN edge: accumulate weight, advance last_active, append
-    // the citing source. This accumulation is exactly what lets us rank experts.
     addInvolvement(personId, projectId, weight, ts, source) {
         const id = `INVOLVED_IN:${personId}->${projectId}`;
         const existing = this.edges.get(id);
@@ -281,17 +286,11 @@ class GraphStore {
         dbg(`     ↳ 🔗 ${type}  ${this.label(from)} → ${this.label(to)}`);
         return edge;
     }
-    // ---------- ingestion ----------
-    // Merge a full LLM extraction batch into the graph. `refs` (optional) maps the
-    // LLM's [mN] source tags to real Slack ts + permalink so citations link to the
-    // exact message; when a ref is present we also use its real ts on the edge.
+    // ---------- ingestion ---------
     ingest(result, channel, refs, authors) {
         dbg(`📥 ingest · ${result.people?.length || 0} people · ${result.projects?.length || 0} projects · ` +
             `${result.decisions?.length || 0} decisions · ${result.involvement?.length || 0} involvement · ` +
             `${result.decisionEdges?.length || 0} decision-edges`);
-        // authors maps a display name → Slack user id (supplied by the bot) so Person
-        // nodes carry a real id and answers can @-mention them. Matched by slug so
-        // "Adam" and "Adam Reyes" resolve to the same id.
         const authorBySlug = new Map();
         for (const [name, id] of Object.entries(authors || {}))
             authorBySlug.set(slug(name), id);
@@ -341,15 +340,11 @@ class GraphStore {
                 continue;
             this.addEdge('RELATES_TO', decision.id, project.id, new Date().toISOString());
         }
-        // Drop nodes with no edges — this is how "normal conversation" gets ignored:
-        // people who only chatted (no involvement / decision) never become clutter.
         const pruned = this.pruneOrphans();
         if (pruned)
             dbg(`🧽 pruned ${pruned} orphan node(s) (chatter, no edges)`);
         dbg(`✅ ingest done · graph: ${this.nodes.size} nodes · ${this.edges.size} edges`);
     }
-    // Remove any node not referenced by an edge (globally — also cleans orphans
-    // left by earlier batches).
     pruneOrphans() {
         const referenced = new Set();
         for (const e of this.edges.values()) {
@@ -371,9 +366,9 @@ class GraphStore {
         if (direct)
             return direct;
         const key = slug(ref);
-        return [...this.nodes.values()].find((n) => n.type === 'Project' && (slug(n.label) === key || n.id === `project:${key}`));
+        return [...this.nodes.values()].find((n) => n.type === 'Project' &&
+            (slug(n.label) === key || n.id === `project:${key}`));
     }
-    // Fuzzy-resolve a decision reference (key or summary) the LLM emitted.
     resolveDecision(ref) {
         const direct = this.nodes.get(`decision:${slug(ref)}`);
         if (direct)
@@ -381,7 +376,6 @@ class GraphStore {
         const key = slug(ref);
         return [...this.nodes.values()].find((n) => n.type === 'Decision' && slug(n.label).includes(key.slice(0, 12)));
     }
-    // ---------- queries ----------
     listProjects() {
         return [...this.nodes.values()].filter((n) => n.type === 'Project');
     }
@@ -391,8 +385,6 @@ class GraphStore {
     listPeople() {
         return [...this.nodes.values()].filter((n) => n.type === 'Person');
     }
-    // Resolve a person a question refers to: a Slack mention <@ID> first, then a
-    // full-name or first-name match against known Person nodes.
     findPersonByText(text) {
         const people = this.listPeople();
         const mention = text.match(/<@([A-Za-z0-9]+)(?:\|[^>]+)?>/);
@@ -408,8 +400,6 @@ class GraphStore {
                 return first.length > 2 && new RegExp(`\\b${first}\\b`).test(t);
             }));
     }
-    // Everything ONE person has demonstrably worked on: their projects (scored the
-    // same way as rankExperts) and the decisions they shaped.
     personActivity(personId) {
         const now = Date.now();
         const halfLifeDays = 30;
@@ -424,20 +414,22 @@ class GraphStore {
             .filter((x) => x.project)
             .sort((a, b) => b.score - a.score);
         const decisions = [...this.edges.values()]
-            .filter((e) => (e.type === 'RAISED_CONCERN' || e.type === 'MADE_CALL') && e.from === personId)
+            .filter((e) => (e.type === 'RAISED_CONCERN' || e.type === 'MADE_CALL') &&
+            e.from === personId)
             .map((edge) => ({ decision: this.nodes.get(edge.to), edge }))
             .filter((x) => x.decision);
         return { person: this.nodes.get(personId), projects, decisions };
     }
-    // Heuristic project match used only as the no-LLM fallback for query routing.
     findProjectByText(text) {
         const t = text.toLowerCase();
         const projects = this.listProjects();
         return (projects.find((p) => t.includes(p.label.toLowerCase())) ||
-            projects.find((p) => p.label.toLowerCase().split(/\s+/).some((w) => w.length > 3 && t.includes(w))) ||
+            projects.find((p) => p.label
+                .toLowerCase()
+                .split(/\s+/)
+                .some((w) => w.length > 3 && t.includes(w))) ||
             projects.find((p) => t.includes(p.id.replace('project:', '').replace(/-/g, ' '))));
     }
-    // Heuristic decision match used only as the no-LLM fallback for query routing.
     findDecisionByText(text) {
         const t = text.toLowerCase();
         const decisions = this.listDecisions();
@@ -453,9 +445,6 @@ class GraphStore {
                 .sort((a, b) => b.score - a.score)
                 .filter((x) => x.score > 0)[0]?.d);
     }
-    // THE core ranking: experts on a project scored by accumulated weight with an
-    // exponential recency boost (30-day half-life) so a recently-active
-    // contributor outranks a long-dormant one, while heavy past work still counts.
     rankExperts(projectId) {
         const now = Date.now();
         const halfLifeDays = 30;
@@ -471,8 +460,6 @@ class GraphStore {
             .filter((x) => x.person)
             .sort((a, b) => b.score - a.score);
     }
-    // Provenance for a decision: who raised concerns, who made the call, and the
-    // projects it relates to — each carrying its source citations.
     decisionProvenance(decisionId) {
         const decision = this.nodes.get(decisionId);
         if (!decision)

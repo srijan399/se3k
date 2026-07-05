@@ -15,29 +15,31 @@ Six boxes, one loop: solid arrows = **ingest** (1–4), dashed arrows = **ask** 
 ```mermaid
 %%{init: {'theme':'base','themeVariables':{'fontSize':'22px','fontFamily':'Inter, Helvetica, sans-serif','lineColor':'#555'}, 'flowchart':{'nodeSpacing':55,'rankSpacing':90,'curve':'basis','htmlLabels':true}}}%%
 flowchart LR
-  SLACK["<b>Slack Workspace</b><br/><br/>messages in channels<br/>/ask-graph &nbsp;·&nbsp; @se3k<br/><i>developer sandbox</i>"]
+  SLACK["<b>Slack Workspaces</b><br/><br/>messages in channels<br/>/ask-graph &nbsp;·&nbsp; @se3k<br/><i>any number, one per OAuth install</i>"]
 
-  BOT["<b>slack-bot</b><br/>Bolt.js · Socket Mode<br/><br/>• event listener + buffer<br/>• slash / mention handlers<br/>• <b>MCP stdio client</b>"]
+  BOT["<b>slack-bot</b><br/>Bolt.js · Socket Mode<br/><br/>• event listener + buffer<br/>• slash / mention handlers<br/>• <b>MCP client (Streamable HTTP)</b><br/>• authorize(teamId) — no static token"]
 
-  MCP["<b>mcp-server — THE BRAIN</b><br/>MCP server over stdio<br/><br/>• tools: ingest_messages, ask_graph<br/>• extract.ts &nbsp;→&nbsp; answer.ts<br/>• store.ts — weighted ranking"]
+  MCP["<b>mcp-server — THE BRAIN</b><br/>persistent · MCP over Streamable HTTP + REST<br/><br/>• tools: ingest_messages, ask_graph (teamId-scoped)<br/>• extract.ts &nbsp;→&nbsp; answer.ts<br/>• store.ts — weighted ranking, per team<br/>• backfill runner (own Slack Web API client)"]
 
   LLM["<b>Groq LLM</b><br/>llama-3.1<br/>OpenAI-compatible"]
 
-  GRAPH[("<b>graph.json</b> — source of truth<br/><br/>Person · Project · Decision<br/><b>INVOLVED_IN</b> (weight, last_active)<br/>RAISED_CONCERN · MADE_CALL")]
+  DB[("<b>Postgres (Drizzle)</b> — source of truth<br/><br/>graph_nodes · graph_edges (per team_id)<br/><b>INVOLVED_IN</b> (weight, last_active)<br/>installations · backfill_jobs · processed_messages")]
 
-  WEB["<b>Next.js dashboard</b><br/><br/>/api/graph<br/>live force-graph"]
+  WEB["<b>Next.js dashboard</b><br/><br/>Slack OAuth install<br/>channel picker + backfill progress<br/>/api/graph → live force-graph"]
 
   SLACK == "1 · new message" ==> BOT
   BOT   == "2 · ingest_messages" ==> MCP
   MCP   == "3 · extract / phrase" ==> LLM
-  MCP   == "4 · persist &amp; query" ==> GRAPH
+  MCP   == "4 · persist &amp; query" ==> DB
 
   SLACK -. "A · question" .-> BOT
   BOT   -. "B · ask_graph" .-> MCP
   MCP   -. "C · answer + citations" .-> BOT
   BOT   -. "D · reply in thread" .-> SLACK
 
-  GRAPH == "live snapshot (poll)" ==> WEB
+  WEB   == "E · OAuth install (bot token)" ==> MCP
+  MCP   == "F · backfill: conversations.list/history" ==> SLACK
+  MCP   == "G · graph snapshot (REST)" ==> WEB
 
   classDef cSlack fill:#4A154B,color:#fff,stroke:#000,stroke-width:2px;
   classDef cBot fill:#36C5F0,color:#04222e,stroke:#04222e,stroke-width:2px;
@@ -50,13 +52,14 @@ flowchart LR
   class BOT cBot
   class MCP cMcp
   class LLM cLlm
-  class GRAPH cGraph
+  class DB cGraph
   class WEB cWeb
 ```
 
 > **Reads in one breath:** Slack → bot → the MCP brain, which extracts with the LLM and
 > writes the weighted graph; a question runs the same path in reverse and comes back
-> **sourced**; the dashboard reads the same graph live.
+> **sourced**; the dashboard drives Slack OAuth to connect new workspaces and trigger
+> full-history backfill, and reads the same (per-workspace) graph live over REST.
 
 ### The two core behaviors (sequence view)
 
@@ -66,18 +69,20 @@ sequenceDiagram
   autonumber
   participant S as Slack
   participant B as slack-bot (Bolt)
-  participant M as mcp-server (ingest_messages)
+  participant M as mcp-server (ingest_messages, teamId)
   participant L as Groq LLM
-  participant G as graph.json
+  participant D as Postgres (team-scoped)
 
   S->>B: message event / channel history (conversations.history)
-  B->>B: resolve names, buffer per channel, flush on size or ~20s idle
-  B->>M: MCP call ingest_messages(tagged text, refs)
+  B->>B: resolve names, buffer per (team, channel), flush on size or ~20s idle
+  B->>M: MCP call ingest_messages(teamId, tagged text, refs) over Streamable HTTP
+  M->>D: check (team, channel, ts) against processed_messages — drop dupes
   M->>M: chunk large blobs (bounded per-call context)
   M->>L: extraction prompt (weight rubric + example)
   L-->>M: {people, projects, decisions, involvement, edges} JSON
-  M->>G: entity-resolve + accumulate INVOLVED_IN (weight, last_active, permalink)
-  Note over G: fix/review = weight 4–5,<br/>mention = 1, assigned-but-idle = 1
+  M->>D: GraphStore.forTeam(teamId): entity-resolve + accumulate INVOLVED_IN
+  M->>D: mark (team, channel, ts) processed — only after the save succeeds
+  Note over D: fix/review = weight 4–5,<br/>mention = 1, assigned-but-idle = 1
 ```
 
 **Query — expertise routing & decision provenance**
@@ -86,26 +91,59 @@ sequenceDiagram
   autonumber
   participant U as User in Slack
   participant B as slack-bot
-  participant M as mcp-server (ask_graph)
-  participant G as graph.json
+  participant M as mcp-server (ask_graph, teamId)
+  participant D as Postgres (team-scoped)
   participant L as Groq LLM
-
   participant C as Semantic cache (Jina)
+
   U->>B: /ask-graph who knows about the checkout timeouts?
-  B->>M: MCP call ask_graph(question)
-  M->>C: embed question, look up at current graph version
+  B->>M: MCP call ask_graph(teamId, question) over Streamable HTTP
+  M->>C: embed question, look up at this workspace's current graph version
   alt semantically-similar hit
     C-->>M: cached answer — ZERO LLM calls
   else miss
+    M->>D: GraphStore.forTeam(teamId) — hydrate this workspace's graph only
     M->>L: route to ONE node via compact label-only catalog
-    M->>G: resolve subgraph (deterministic, in code)
-    G-->>M: ranked experts by score(p) = W·(0.4+0.6·recency)
+    D-->>M: resolve subgraph (deterministic, in code)
+    M-->>M: ranked experts by score(p) = W·(0.4+0.6·recency)
     M->>L: phrase ONLY these grounded facts
     L-->>M: natural-language answer
     M->>C: store answer under the graph version
   end
   M-->>B: answer + source permalinks
   B-->>U: reply in-channel / in-thread (never uncited)
+```
+
+**Connecting a workspace — OAuth install & full-history backfill**
+```mermaid
+sequenceDiagram
+  autonumber
+  participant Op as Workspace admin (browser)
+  participant W as web (Next.js)
+  participant Sl as Slack OAuth
+  participant M as mcp-server (REST)
+  participant Db as Postgres
+  participant Sk as Slack Web API
+
+  Op->>W: click "Connect Slack"
+  W->>Sl: redirect to /oauth/v2/authorize (bot scopes incl. groups:read, channels:join)
+  Sl-->>W: redirect back to /api/slack/oauth/callback with ?code
+  W->>Sl: oauth.v2.access(code) → bot token + team_id + team_name
+  W->>M: POST /internal/installations {teamId, botToken, ...}
+  M->>Db: upsert installations row (onConflictDoUpdate by teamId)
+
+  Op->>W: pick channels (or "auto-join all public"), click Backfill
+  W->>M: POST /internal/backfill {teamId, channelIds | autoJoinPublic}
+  M->>Db: insert backfill_jobs row (status=pending) → jobId
+  M-->>W: 202 Accepted {jobId}
+  par backfill runs async
+    M->>Sk: conversations.list / conversations.history (paginated, per channel)
+    M->>Db: check + mark processed_messages, extract + save each batch
+    M->>Db: update backfill_jobs progress (channelsDone, messagesProcessed)
+  and web polls for progress
+    W->>M: GET /internal/backfill/:jobId (every ~2s)
+    M-->>W: {status, channelsDone, messagesProcessed}
+  end
 ```
 
 ### The ranking that makes it work (the differentiator)
@@ -124,42 +162,50 @@ score(person) = W · (0.4 + 0.6 · recency)
 
 ```
                        ┌──────────────────────────────────────────┐
-                       │        SLACK WORKSPACE (sandbox)          │
-                       │  msgs • /ask-graph • /se3k-ingest • @se3k │
+                       │   SLACK WORKSPACES (any number, one per   │
+                       │   OAuth install) — msgs • /ask-graph •    │
+                       │   /se3k-ingest • @se3k                    │
                        └───────┬───────────────────────▲──────────┘
               message event    │                       │  sourced answer
                                ▼                       │
                        ┌──────────────────────────────────────────┐
                        │   slack-bot  (Bolt.js, Socket Mode)       │
                        │  event listener • buffer • cmd handlers   │
-                       │            └── MCP stdio client ──┐       │
-                       └──────────────────────────────────┼───────┘
-                       ingest_messages / ask_graph (MCP)  │
+                       │  authorize(teamId) — no static bot token  │
+                       │       └── MCP client (Streamable HTTP) ─┐ │
+                       └──────────────────────────────────────────┼─┘
+                       ingest_messages / ask_graph (teamId, MCP)  │
                                                           ▼
    ┌───────┐  extraction   ┌───────────────────────────────────────────┐
-   │ Groq  │◀──prompt──────│         mcp-server  (THE BRAIN)           │
-   │ LLM   │──JSON────────▶│  ingest_messages   ask_graph              │
-   │(llama)│   phrase ▲    │  extract.ts        answer.ts              │
-   └───────┘   facts  └────│  ───────────────  store.ts (graph+rank)   │
+   │ Groq  │◀──prompt──────│      mcp-server  (THE BRAIN — persistent) │
+   │ LLM   │──JSON────────▶│  ingest_messages   ask_graph               │
+   │(llama)│   phrase ▲    │  extract.ts        answer.ts               │
+   └───────┘   facts  └────│  store.ts (per-team)  backfill runner      │
                            └───────────────┬───────────────▲──────────┘
-                             persist/read  │               │ read subgraph
-                                           ▼               │
+                     persist/read (per team)│               │ REST: install /
+                                           ▼               │ backfill trigger+status /
+                       ┌──────────────────────────────────┐ │ graph snapshot
+                       │   Postgres (Drizzle) — truth        │
+                       │  graph_nodes / graph_edges (team_id)│
+                       │  installations · backfill_jobs      │
+                       │  processed_messages (idempotency)   │
+                       └──────────────────────────────────┘
+                                                             │
                        ┌──────────────────────────────────────────┐
-                       │     graph-store/graph.json  (truth)       │
-                       │  Person·Project·Decision  +  weighted      │
-                       │  INVOLVED_IN(weight,last_active), etc.     │
-                       └───────────────┬──────────────────────────┘
-                          JSON snapshot│
-                                       ▼
-                       ┌──────────────────────────────────────────┐
-                       │   web  (Next.js) — /api/graph → GraphView │
-                       │   live force-graph, colored by node type  │
+                       │   web  (Next.js)                          │
+                       │  Slack OAuth install • channel picker +   │
+                       │  backfill progress • /api/graph → GraphView│
                        └──────────────────────────────────────────┘
 ```
+_(mcp-server also calls Slack's `conversations.list`/`history` directly during a
+backfill job, using the workspace's stored bot token — omitted above for
+clarity; see the sequence diagrams for the full picture.)_
 
-**Required-tech mapping for judges:** MCP server integration = the brain & the bot↔brain link ·
-Slack AI capabilities = the `/ask-graph` agent · history backfill = `conversations.history`
-pulled automatically on channel join.
+**Required-tech mapping for judges:** MCP server integration = the brain, reachable by
+both the bot (Streamable HTTP) and the dashboard (REST) · Slack AI capabilities = the
+`/ask-graph` agent · history backfill = automatic on-join catch-up via
+`conversations.history`, plus an explicit paginated full-history job triggered from the
+dashboard for workspaces installing after years of activity.
 
 ---
 
@@ -169,7 +215,7 @@ This is the full picture: how data flows from a Slack message into a graph, and 
 
 ```mermaid
 flowchart TB
-    subgraph Slack["Slack Workspace (sandbox)"]
+    subgraph Slack["Slack Workspaces (any number, one per OAuth install)"]
         SM[New Message / Thread Reply]
         SQ["/ask-graph command or @mention"]
     end
@@ -177,50 +223,70 @@ flowchart TB
     subgraph Bot["Slack Bot Service (Bolt.js, Node/TS)"]
         EL[Event Listener]
         SC[Slash Command Handler]
-        RTS[Real-Time Search API client]
+        RTS[On-join backfill via conversations.history]
+        AUTH["authorize(teamId)<br/>per-workspace bot token, no static token"]
     end
 
-    subgraph MCP["MCP Server (Node/TS)"]
+    subgraph MCP["MCP Server (Node/TS) — persistent, Streamable HTTP + REST"]
         EX[Extraction Tool<br/>LLM call: messages → entities/edges JSON]
         QR[Query Tool<br/>LLM call: question → structured graph query]
         AN[Answer Composer<br/>subgraph → natural language + sources]
+        BF[Backfill Runner<br/>paginated conversations.list/history<br/>per team_id, own Slack Web API client]
+        REST[REST layer<br/>installations · backfill jobs · graph snapshot]
     end
 
-    subgraph Graph["Graph Store"]
-        GS[(In-memory graph<br/>JSON-persisted)]
+    subgraph Graph["Postgres (Drizzle) — partitioned by team_id"]
+        GS[(graph_nodes / graph_edges)]
         N1["Node: Person"]
         N2["Node: Project"]
         N3["Node: Decision"]
         E1["Edge: INVOLVED_IN<br/>(weight, last_active)"]
         E2["Edge: RAISED_CONCERN / MADE_CALL"]
         E3["Edge: RELATES_TO"]
+        INST[(installations<br/>bot token per team)]
+        JOBS[(backfill_jobs<br/>status + progress)]
+        PROC[(processed_messages<br/>idempotency)]
     end
 
     subgraph Web["Next.js App"]
-        API[API Route: /api/graph]
+        OAUTH[Slack OAuth install + callback]
+        PICK[Channel picker / auto-join<br/>+ backfill trigger]
+        API[API Route: /api/graph proxy]
         DASH[Dashboard: graph visualization<br/>react-force-graph]
     end
 
     SM -->|on channel join: backfill| RTS
     RTS --> EL
     SM --> EL
-    EL -->|raw message batch| EX
+    EL -->|raw message batch, teamId| EX
     EX -->|extracted nodes/edges| GS
+    EX -->|check / mark| PROC
     GS --- N1
     GS --- N2
     GS --- N3
     N1 --- E1
     N1 --- E2
     N3 --- E3
+    AUTH -.->|reads bot token| INST
 
     SQ --> SC
-    SC -->|question text| QR
+    SC -->|question text, teamId| QR
     QR -->|reads| GS
     QR -->|relevant subgraph| AN
     AN -->|answer + citations| SC
     SC -->|reply in Slack thread| SQ
 
-    GS -->|graph snapshot| API
+    OAUTH -->|POST installation| REST
+    REST --> INST
+    PICK -->|POST backfill| REST
+    REST --> JOBS
+    REST --> BF
+    BF -->|conversations.list/history| SM
+    BF -->|extract + save, then mark| GS
+    BF --> PROC
+    PICK -.->|poll status| JOBS
+
+    GS -->|REST graph snapshot| API
     API --> DASH
 
     style Slack fill:#4A154B,color:#fff
@@ -230,9 +296,9 @@ flowchart TB
     style Web fill:#000,color:#fff
 ```
 
-**Key design point to keep visible in your head:** the `INVOLVED_IN` edge is the only place "expertise routing" actually lives. Everything else is plumbing to get data into that edge and query it back out. If you're ever unsure what to build next, ask "does this get me closer to a correct, well-weighted `INVOLVED_IN` edge, or to querying it well?"
+**Key design point to keep visible in your head:** the `INVOLVED_IN` edge is the only place "expertise routing" actually lives — now scoped per Slack workspace (`team_id`), but the mechanism is unchanged. Everything else is plumbing to get data into that edge and query it back out. If you're ever unsure what to build next, ask "does this get me closer to a correct, well-weighted `INVOLVED_IN` edge, or to querying it well?"
 
-> **Implementation notes (current build).** Ingestion is now **automatic**: the bot backfills recent history via `conversations.history` when it joins a channel, then buffers new messages and flushes them on a short inactivity timer (or batch size) — no manual trigger. Slack user IDs are resolved to display names (`users.info`) before extraction, messages are de-duped by timestamp, and the `EX` extraction step **chunks** large blobs into bounded per-call prompts (merging results) so a 100-message thread never becomes one giant LLM call. On the query side, `QR` first routes a question to one graph node using a **compact label-only catalog** (cheap + robust), then `AN` runs the deterministic ranking/provenance and phrases the grounded facts with citations. A **semantic answer cache** sits in front of this: `ask_graph` embeds the question (Jina) and returns a previously-computed answer for a semantically-similar question at the same graph version — **zero LLM calls** — invalidated automatically whenever the graph changes. Everything degrades to keyword matching + the seeded graph when no LLM key is set, and the cache is a no-op without `JINA_API_KEY`.
+> **Implementation notes (current build).** The MCP server now runs as a **persistent, multi-workspace service** — `slack-bot` connects to it over **Streamable HTTP** (not a spawned stdio child process), and `web` reaches the same running process over a REST layer for installs, backfill, and graph reads. Every tool call and REST call carries a `teamId`; `GraphStore.forTeam(teamId)` hydrates only that workspace's rows from Postgres (Drizzle) per call, so workspaces never see each other's data. `slack-bot` itself holds no static bot token — an `authorize(teamId)` function looks up the right token per event, which is what lets one running bot process serve every installed workspace. Ingestion is still **automatic**: the bot backfills recent history via `conversations.history` when it joins a channel, then buffers new messages and flushes them on a short inactivity timer (or batch size). For a workspace that's been running long before installing SE3K, `web`'s OAuth flow now also exposes an explicit **backfill job**: pick channels (or auto-join every public one), and `mcp-server` paginates full channel history itself, using the stored bot token, tracking progress in a `backfill_jobs` row `web` polls. Every batch — live or backfilled — is checked against a `processed_messages` table (`team_id, channel_id, ts`) **before** extraction and only marked **after** a successful save, so a flaky LLM call skips a batch instead of losing or double-counting it, and live ingestion + backfill can safely overlap. Slack user IDs are resolved to display names (`users.info`) before extraction, and the `EX` extraction step **chunks** large blobs into bounded per-call prompts (merging results) so a 100-message thread — or a multi-year backfill — never becomes one giant LLM call. On the query side, `QR` first routes a question to one graph node using a **compact label-only catalog** (cheap + robust), then `AN` runs the deterministic ranking/provenance and phrases the grounded facts with citations. A **semantic answer cache** sits in front of this, scoped per workspace: `ask_graph` embeds the question (Jina) and returns a previously-computed answer for a semantically-similar question at the same graph version — **zero LLM calls** — invalidated automatically whenever that workspace's graph changes. Everything degrades to keyword matching + the seeded graph when no LLM key is set, and the cache is a no-op without `JINA_API_KEY`.
 
 ---
 

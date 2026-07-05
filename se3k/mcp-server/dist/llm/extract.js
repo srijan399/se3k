@@ -3,17 +3,7 @@ Object.defineProperty(exports, "__esModule", { value: true });
 exports.chunkMessages = chunkMessages;
 exports.extractGraph = extractGraph;
 const client_1 = require("./client");
-// NOTE ON LOGGING: this process is an MCP server whose STDOUT is the JSON-RPC
-// transport. All debug output MUST go to stderr (console.error) or it corrupts
-// the protocol. `dbg` centralizes that.
 const dbg = (...args) => console.error('[se3k:extract]', ...args);
-// ============================================================================
-// THE EXTRACTION PROMPT — the heart of the project.
-// Longer + example-driven on purpose: the default model is small (llama-3.1-8b),
-// and a concrete worked example makes weighting and the "assignee ≠ expert" rule
-// far more reliable than abstract instructions alone. Keep the prompt AND its
-// JSON schema together here so they iterate as one unit (AGENTS.md).
-// ============================================================================
 const EXTRACTION_SYSTEM = `You are SE3K's extraction engine. You read raw Slack conversation logs from a tech company and turn them into a knowledge graph that answers ONE question better than Jira ever could: "who ACTUALLY knows about X" — judged by demonstrated hands-on work, NOT by who is formally assigned.
 
 OUTPUT: STRICT JSON only (no prose, no markdown fences) matching this schema:
@@ -88,7 +78,8 @@ function chunkMessages(text, maxLines = MAX_LINES, maxChars = MAX_CHARS) {
     let buf = [];
     let chars = 0;
     for (const line of lines) {
-        if (buf.length > 0 && (buf.length >= maxLines || chars + line.length > maxChars)) {
+        if (buf.length > 0 &&
+            (buf.length >= maxLines || chars + line.length > maxChars)) {
             chunks.push(buf.join('\n'));
             const overlap = buf.slice(-1);
             buf = [...overlap];
@@ -109,10 +100,6 @@ function stripFences(s) {
         .replace(/```$/i, '')
         .trim();
 }
-// Extract entities/edges from ONE bounded chunk (a single LLM call). `known`
-// carries the keys from earlier chunks so extraction stays consistent across a
-// split thread (otherwise a 30-message convo fragments into "Checkout API" +
-// "Checkout Service" etc.).
 async function extractChunk(chunkText, known) {
     dbg(`🧠 extract · chunk (${chunkText.split('\n').length} lines)`);
     const hint = known && (known.projects.size || known.decisions.size)

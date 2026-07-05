@@ -1,5 +1,6 @@
-import * as fs from 'fs';
-import * as path from 'path';
+import { eq } from 'drizzle-orm';
+import { db } from '../db/client';
+import { graphEdges, graphNodes } from '../db/schema';
 import {
   EdgeType,
   ExtractionResult,
@@ -8,12 +9,59 @@ import {
   GraphSnapshot,
   MessageRef,
   MessageRefs,
+  NodeType,
   Source,
 } from './types';
 
 const dbg = (...args: unknown[]) => console.error('[se3k:store]', ...args);
 
-const DEFAULT_PATH = path.resolve(__dirname, '../../../graph-store/graph.json');
+function rowToNode(r: typeof graphNodes.$inferSelect): GraphNode {
+  return {
+    id: r.id,
+    type: r.type as NodeType,
+    label: r.label,
+    slackUserId: r.slackUserId ?? undefined,
+    meta: r.meta ?? undefined,
+  };
+}
+
+function nodeToRow(teamId: string, n: GraphNode) {
+  return {
+    teamId,
+    id: n.id,
+    type: n.type,
+    label: n.label,
+    slackUserId: n.slackUserId ?? null,
+    meta: n.meta ?? null,
+  };
+}
+
+function rowToEdge(r: typeof graphEdges.$inferSelect): GraphEdge {
+  return {
+    id: r.id,
+    type: r.type as EdgeType,
+    from: r.from,
+    to: r.to,
+    weight: r.weight,
+    last_active: r.lastActive,
+    sources: (r.sources as Source[]) || [],
+    meta: r.meta ?? undefined,
+  };
+}
+
+function edgeToRow(teamId: string, e: GraphEdge) {
+  return {
+    teamId,
+    id: e.id,
+    type: e.type,
+    from: e.from,
+    to: e.to,
+    weight: e.weight,
+    lastActive: e.last_active,
+    sources: e.sources,
+    meta: e.meta ?? null,
+  };
+}
 
 function lookupRef(
   refs: MessageRefs | undefined,
@@ -68,32 +116,51 @@ function slug(s: string): string {
 export class GraphStore {
   private nodes = new Map<string, GraphNode>();
   private edges = new Map<string, GraphEdge>();
-  private filePath: string;
+  readonly teamId: string;
 
-  constructor(filePath: string = process.env.GRAPH_STORE_PATH || DEFAULT_PATH) {
-    this.filePath = filePath;
-    this.load();
+  private constructor(teamId: string) {
+    this.teamId = teamId;
   }
 
-  load(): void {
-    try {
-      if (!fs.existsSync(this.filePath)) return;
-      const raw = JSON.parse(
-        fs.readFileSync(this.filePath, 'utf-8'),
-      ) as GraphSnapshot;
-      this.nodes = new Map((raw.nodes || []).map((n) => [n.id, n]));
-      this.edges = new Map((raw.edges || []).map((e) => [e.id, e]));
-      dbg(`📂 loaded ${this.nodes.size} nodes · ${this.edges.size} edges`);
-    } catch (err) {
-      dbg('load failed (starting empty):', err);
-    }
+  // Hydrate a team's graph from Postgres. Every MCP tool / REST handler gets
+  // its own short-lived store per call — workspace-sized graphs are cheap to
+  // load in full, so there's no cross-call cache to invalidate.
+  static async forTeam(teamId: string): Promise<GraphStore> {
+    const store = new GraphStore(teamId);
+    await store.hydrate();
+    return store;
   }
 
-  save(): void {
-    const dir = path.dirname(this.filePath);
-    if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
-    fs.writeFileSync(this.filePath, JSON.stringify(this.snapshot(), null, 2));
-    dbg(`💾 saved ${this.nodes.size} nodes · ${this.edges.size} edges`);
+  private async hydrate(): Promise<void> {
+    const [nodeRows, edgeRows] = await Promise.all([
+      db.select().from(graphNodes).where(eq(graphNodes.teamId, this.teamId)),
+      db.select().from(graphEdges).where(eq(graphEdges.teamId, this.teamId)),
+    ]);
+    this.nodes = new Map(nodeRows.map((r) => [r.id, rowToNode(r)]));
+    this.edges = new Map(edgeRows.map((r) => [r.id, rowToEdge(r)]));
+    dbg(
+      `📂 loaded ${this.nodes.size} nodes · ${this.edges.size} edges (team ${this.teamId})`,
+    );
+  }
+
+  // Full-snapshot overwrite of this team's rows — mirrors the old JSON
+  // file's "write the whole graph" semantics, just against Postgres.
+  async saveTeam(): Promise<void> {
+    const nodeRows = [...this.nodes.values()].map((n) =>
+      nodeToRow(this.teamId, n),
+    );
+    const edgeRows = [...this.edges.values()].map((e) =>
+      edgeToRow(this.teamId, e),
+    );
+    await db.transaction(async (tx) => {
+      await tx.delete(graphNodes).where(eq(graphNodes.teamId, this.teamId));
+      await tx.delete(graphEdges).where(eq(graphEdges.teamId, this.teamId));
+      if (nodeRows.length) await tx.insert(graphNodes).values(nodeRows);
+      if (edgeRows.length) await tx.insert(graphEdges).values(edgeRows);
+    });
+    dbg(
+      `💾 saved ${this.nodes.size} nodes · ${this.edges.size} edges (team ${this.teamId})`,
+    );
   }
 
   snapshot(): GraphSnapshot {
@@ -193,7 +260,7 @@ export class GraphStore {
     return this.nodes.get(id)?.label ?? id;
   }
 
-  setPersonIds(ids: Record<string, string>): number {
+  async setPersonIds(ids: Record<string, string>): Promise<number> {
     const bySlug = new Map<string, string>();
     for (const [name, id] of Object.entries(ids))
       if (name && id) bySlug.set(slug(name), id);
@@ -206,7 +273,7 @@ export class GraphStore {
         n++;
       }
     }
-    if (n) this.save();
+    if (n) await this.saveTeam();
     return n;
   }
 

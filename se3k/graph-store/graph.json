@@ -3,22 +3,26 @@
     {
       "id": "person:adam-reyes",
       "type": "Person",
-      "label": "Adam Reyes"
+      "label": "Adam Reyes",
+      "slackUserId": "U0BDR6CT8F3"
     },
     {
       "id": "person:ivan-sanders",
       "type": "Person",
-      "label": "Ivan Sanders"
+      "label": "Ivan Sanders",
+      "slackUserId": "U0BDH33M603"
     },
     {
       "id": "person:rahul-sharma",
       "type": "Person",
-      "label": "Rahul Sharma"
+      "label": "Rahul Sharma",
+      "slackUserId": "U0BEB434W76"
     },
     {
       "id": "person:sam-okafor",
       "type": "Person",
-      "label": "Sam Okafor"
+      "label": "Sam Okafor",
+      "slackUserId": "U0BDM87P0HL"
     },
     {
       "id": "project:checkout-api",
@@ -212,5 +216,5 @@
       "sources": []
     }
   ],
-  "updatedAt": "2026-07-03T09:14:42.572Z"
+  "updatedAt": "2026-07-04T14:24:44.098Z"
 }

@@ -168,7 +168,14 @@ export async function extractGraph(
   dbg(
     `✂️  ${messagesText.split('\n').length} lines → ${chunks.length} chunk(s)`,
   );
-  if (chunks.length <= 1) return extractChunk(messagesText);
+  if (chunks.length <= 1) {
+    try {
+      return await extractChunk(messagesText);
+    } catch (err) {
+      dbg('⚠️  extract · single-chunk call failed:', err);
+      return EMPTY;
+    }
+  }
 
   const acc: ExtractionResult = {
     people: [],

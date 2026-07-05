@@ -46,8 +46,13 @@ to the exact message**, and when it doesn't know, it _says so_ instead of invent
 - **Instant repeat answers.** A semantic cache (via [Jina](https://jina.ai/embeddings))
   recognizes a reworded question and answers with **zero LLM calls**, then
   self-invalidates the moment new messages land, so it's never stale.
-- **Zero-setup ingestion.** Invite the bot to a channel and it backfills the
-  history, then keeps learning automatically. No commands.
+- **One-click install, any workspace.** Slack OAuth from the dashboard connects a
+  new workspace in a click. Each gets its own isolated graph — no shared state,
+  no cross-workspace bleed.
+- **Catches up on years, not just today.** Invite the bot and it starts learning
+  immediately, but a workspace that's been running for years doesn't have to start
+  from zero: a one-click backfill job walks its **entire** channel history (not
+  just the last few hundred messages) with live progress in the dashboard.
 - **Handles giant threads.** A 200-message thread is split, processed, and merged,
   never choking the context window.
 - **Human-proof.** Ignores banter and emoji, but catches "I'll pick up the billing
@@ -74,25 +79,40 @@ many conversations over time.**
 ## 🏗️ How we built it
 
 Three small services, wired so the **MCP server is the brain** and everything else
-is I/O:
+is I/O — now a persistent, multi-workspace service instead of a single-tenant
+sidecar:
 
 <p align="center">
   <img src="web/public/Architecture_Se3k.png" alt="SE3K architecture" width="820" />
 </p>
 
-- **The bot** (Bolt, Socket Mode) is a genuine **MCP client**: it spawns the brain
-  and calls its tools, so ingestion and reasoning become a reusable surface, not glue.
-- **The brain** (MCP server) uses an LLM to extract structured entities from
-  messages and to phrase answers, but it **never lets the model free-associate.** It
-  resolves the facts from the graph in code first, then asks the model only to word
-  them. That's what lets it cite instead of hallucinate.
+- **The bot** (Bolt, Socket Mode) is a genuine **MCP client**: it talks to the brain
+  over Streamable HTTP and calls its tools, so ingestion and reasoning stay a
+  reusable surface, not glue. It authorizes per-message via a Slack `team_id`
+  lookup instead of one static bot token, so a single running bot process serves
+  every installed workspace at once.
+- **The brain** (MCP server) now runs as a persistently-reachable service: MCP
+  tool calls from the bot and REST calls from the dashboard hit the same process.
+  It uses an LLM to extract structured entities from messages and to phrase
+  answers, but it **never lets the model free-associate.** It resolves the facts
+  from the graph in code first, then asks the model only to word them — that's
+  what lets it cite instead of hallucinate.
+- **Storage moved to Postgres (Drizzle)**, partitioned by workspace: every node,
+  edge, installed bot token, and backfill job is keyed by `team_id`, so
+  workspaces are fully isolated and a message is never double-counted whether it
+  arrives live or via backfill.
 - **Provider-agnostic**, defaults to **Groq** (`llama-3.1-8b-instant`); with no key
   at all it still answers from a seeded graph.
-- **The dashboard** (Next.js + react-force-graph) renders the live graph, colored by
-  type and sized by involvement, so you can _watch_ it grow.
+- **The dashboard** (Next.js + react-force-graph) is also where a workspace gets
+  connected: a real Slack OAuth install flow, a picker for which channels to
+  backfill (or auto-join every public one), and a live progress view — on top of
+  the same force-directed graph, colored by type and sized by involvement.
 
-_For the challenge:_ **MCP** is the whole ingestion and query brain, **Slack AI** is
-the in-Slack agent, and history backfill uses `conversations.history` on join.
+_For the challenge:_ **MCP** is the whole ingestion and query brain, now served
+over Streamable HTTP so both the bot and the dashboard are its clients; **Slack
+AI** is the in-Slack agent; and history backfill covers both zero-effort on-join
+catch-up (`conversations.history`) and an explicit, paginated full-history job
+triggered from the dashboard for workspaces installing after years of activity.
 
 ## 🧪 See it in action
 
@@ -132,6 +152,12 @@ zero tokens. New messages posted? The cache quietly forgets and re-answers fresh
 - **A calm live graph.** The dashboard re-heated its physics on every poll, so nodes
   flew around like the page was reloading. Fix: skip identical polls and preserve
   node identity so settled positions stick.
+- **Backfill and live ingestion racing each other.** Once history backfill could
+  run as its own job, the same message could get extracted twice — once live,
+  once from history — silently doubling its weight. Fixed with a
+  `(team, channel, ts)` idempotency table that only commits *after* a successful
+  ingest, so a flaky LLM call skips a batch instead of permanently losing or
+  double-counting it.
 
 ## 📚 What we learned
 

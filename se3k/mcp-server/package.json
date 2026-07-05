@@ -8,7 +8,11 @@
     "build": "tsc",
     "start": "node dist/index.js",
     "seed": "ts-node src/seed.ts",
-    "ask": "ts-node src/cli.ts"
+    "ask": "ts-node src/cli.ts",
+    "db:generate": "drizzle-kit generate",
+    "db:push": "drizzle-kit push",
+    "db:studio": "drizzle-kit studio",
+    "db:migrate-json": "ts-node src/db/migrateJsonToPg.ts"
   },
   "keywords": [],
   "author": "",
@@ -16,12 +20,19 @@
   "type": "commonjs",
   "dependencies": {
     "@modelcontextprotocol/sdk": "^1.29.0",
+    "@slack/web-api": "^7.17.0",
     "dotenv": "^17.4.2",
+    "drizzle-orm": "^0.45.2",
+    "express": "^4.21.2",
     "openai": "^4.104.0",
+    "pg": "^8.13.1",
     "zod": "^4.4.3"
   },
   "devDependencies": {
+    "@types/express": "^4.17.21",
     "@types/node": "^26.0.1",
+    "@types/pg": "^8.11.10",
+    "drizzle-kit": "^0.31.10",
     "ts-node": "^10.9.2",
     "typescript": "^6.0.3"
   }

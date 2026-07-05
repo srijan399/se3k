@@ -11,9 +11,25 @@ interface Entry {
   question: string;
   result: AnswerResult;
   version: string;
+  mentions: string[];
 }
 
 const entries: Entry[] = [];
+
+const MENTION_RE = /<@([A-Z0-9]+)>/g;
+
+// Embeddings treat "<@U0BDR6CT8F3>" and "<@U0BDT3PHBK6>" as near-identical
+// tokens, so two questions about different people can score above THRESHOLD.
+// Require exact agreement on which users are @-mentioned before trusting
+// the embedding similarity.
+function extractMentions(text: string): string[] {
+  return [...text.matchAll(MENTION_RE)].map((m) => m[1]).sort();
+}
+
+function sameMentions(a: string[], b: string[]): boolean {
+  if (a.length !== b.length) return false;
+  return a.every((id, i) => id === b[i]);
+}
 
 function cosine(a: number[], b: number[]): number {
   let dot = 0;
@@ -36,10 +52,12 @@ export async function lookup(
   if (!embeddingsEnabled) return { result: null, embedding: null };
   const vec = await embed(question);
   if (!vec) return { result: null, embedding: null };
+  const mentions = extractMentions(question);
 
   let best: { entry: Entry; score: number } | null = null;
   for (const e of entries) {
     if (e.version !== version) continue; // stale (graph changed) — ignore
+    if (!sameMentions(mentions, e.mentions)) continue; // different @-mentioned user(s)
     const score = cosine(vec, e.vec);
     if (!best || score > best.score) best = { entry: e, score };
   }
@@ -64,7 +82,7 @@ export async function store(
   if (!embeddingsEnabled) return;
   const vec = embedding || (await embed(question));
   if (!vec) return;
-  entries.push({ vec, question, result, version });
+  entries.push({ vec, question, result, version, mentions: extractMentions(question) });
   if (entries.length > MAX) entries.splice(0, entries.length - MAX); // drop oldest
   dbg(`   ↳ cached "${question}" (${entries.length}/${MAX})`);
 }

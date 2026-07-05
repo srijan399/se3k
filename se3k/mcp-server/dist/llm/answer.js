@@ -238,11 +238,6 @@ async function phrase(prompt, fallback) {
         return fallback;
     }
 }
-// ---------------------------------------------------------------------------
-// Main entry: resolve the question, run the deterministic graph logic, phrase.
-// ---------------------------------------------------------------------------
-// Public entry: serve from the semantic cache when possible (zero LLM calls),
-// otherwise compute the answer and remember it for next time.
 async function answerQuestion(store, question) {
     const version = store.version();
     const { result, embedding } = await cache.lookup(question, version);

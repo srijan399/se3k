@@ -3,14 +3,7 @@ Object.defineProperty(exports, "__esModule", { value: true });
 exports.lookup = lookup;
 exports.store = store;
 const embed_1 = require("../llm/embed");
-// Semantic answer cache: if a semantically-similar question was already answered
-// against the CURRENT graph, return that answer with zero LLM calls. In-memory,
-// lives for the MCP server process (which the bot spawns once).
-// STDOUT is the MCP JSON-RPC transport, so debug goes to stderr.
 const dbg = (...args) => console.error('[se3k:cache]', ...args);
-// 0.72 empirically separates rewordings of the same question (~0.76-0.81 with
-// jina-embeddings-v3 text-matching) from different topics (≤ ~0.58) — see the
-// verification notes. Tune via env if your questions cluster differently.
 const THRESHOLD = Number(process.env.SEMANTIC_CACHE_THRESHOLD) || 0.72;
 const MAX = Number(process.env.SEMANTIC_CACHE_MAX) || 200;
 const entries = [];
@@ -28,9 +21,6 @@ function cosine(a, b) {
         return 0;
     return dot / (Math.sqrt(na) * Math.sqrt(nb));
 }
-// Look for a cached answer to a semantically-similar question at this graph
-// version. Returns the hit (if any) plus the question's embedding, so the caller
-// can hand it back to store() on a miss without embedding twice.
 async function lookup(question, version) {
     if (!embed_1.embeddingsEnabled)
         return { result: null, embedding: null };
@@ -52,7 +42,6 @@ async function lookup(question, version) {
     dbg(`   cache miss${best ? ` (best ${best.score.toFixed(3)})` : ''} · "${question}"`);
     return { result: null, embedding: vec };
 }
-// Remember an answer. Reuses the embedding computed during lookup when provided.
 async function store(question, result, version, embedding) {
     if (!embed_1.embeddingsEnabled)
         return;

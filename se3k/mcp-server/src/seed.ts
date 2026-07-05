@@ -19,7 +19,7 @@ function daysAgo(n: number): string {
   return new Date(Date.now() - n * 86_400_000).toISOString();
 }
 
-export function seed(store: GraphStore): void {
+export async function seed(store: GraphStore): Promise<void> {
   store.clear();
 
   // ---- People (real cast) ----
@@ -116,11 +116,19 @@ export function seed(store: GraphStore): void {
   });
   store.addEdge('RELATES_TO', optimisticCart.id, cart.id, daysAgo(3));
 
-  store.save();
+  await store.saveTeam();
   const snap = store.snapshot();
   console.error(`Seeded graph: ${snap.nodes.length} nodes, ${snap.edges.length} edges`);
 }
 
 if (require.main === module) {
-  seed(new GraphStore());
+  const teamId = process.argv[2];
+  if (!teamId) {
+    console.error('Usage: pnpm seed <teamId>');
+    process.exit(1);
+  }
+  GraphStore.forTeam(teamId).then(seed).catch((err) => {
+    console.error(err);
+    process.exit(1);
+  });
 }

@@ -63,7 +63,7 @@ function withAlpha(hex: string, a: number) {
   return `rgba(${(n >> 16) & 255},${(n >> 8) & 255},${n & 255},${a})`;
 }
 
-export default function GraphView() {
+export default function GraphView({ teamId }: { teamId: string }) {
   const [snap, setSnap] = useState<Snapshot>({
     nodes: [],
     edges: [],
@@ -145,7 +145,9 @@ export default function GraphView() {
   const load = useCallback(async () => {
     let json: Snapshot;
     try {
-      const res = await fetch('/api/graph', { cache: 'no-store' });
+      const res = await fetch(`/api/graph?team=${encodeURIComponent(teamId)}`, {
+        cache: 'no-store',
+      });
       json = await res.json();
     } catch {
       return; // transient — retry next tick without disturbing the view
@@ -225,7 +227,7 @@ export default function GraphView() {
     } else {
       fgRef.current?.refresh?.();
     }
-  }, []);
+  }, [teamId]);
 
   useEffect(() => {
     load();

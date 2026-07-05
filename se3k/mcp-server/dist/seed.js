@@ -19,7 +19,7 @@ const store_1 = require("./graph/store");
 function daysAgo(n) {
     return new Date(Date.now() - n * 86400000).toISOString();
 }
-function seed(store) {
+async function seed(store) {
     store.clear();
     // ---- People (real cast) ----
     const adam = store.upsertPerson('Adam Reyes'); // CEO / Sr. Backend — formal owner, hands off
@@ -101,10 +101,18 @@ function seed(store) {
         excerpt: 'Final call: ship optimistic updates with a rollback toast + retry on failure.',
     });
     store.addEdge('RELATES_TO', optimisticCart.id, cart.id, daysAgo(3));
-    store.save();
+    await store.saveTeam();
     const snap = store.snapshot();
     console.error(`Seeded graph: ${snap.nodes.length} nodes, ${snap.edges.length} edges`);
 }
 if (require.main === module) {
-    seed(new store_1.GraphStore());
+    const teamId = process.argv[2];
+    if (!teamId) {
+        console.error('Usage: pnpm seed <teamId>');
+        process.exit(1);
+    }
+    store_1.GraphStore.forTeam(teamId).then(seed).catch((err) => {
+        console.error(err);
+        process.exit(1);
+    });
 }
