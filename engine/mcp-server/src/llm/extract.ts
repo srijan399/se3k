@@ -169,12 +169,7 @@ export async function extractGraph(
     `✂️  ${messagesText.split('\n').length} lines → ${chunks.length} chunk(s)`,
   );
   if (chunks.length <= 1) {
-    try {
-      return await extractChunk(messagesText);
-    } catch (err) {
-      dbg('⚠️  extract · single-chunk call failed:', err);
-      return EMPTY;
-    }
+    return await extractChunk(messagesText);
   }
 
   const acc: ExtractionResult = {
@@ -188,16 +183,13 @@ export async function extractGraph(
   const known: KnownEntities = { projects: new Map(), decisions: new Map() };
   for (let i = 0; i < chunks.length; i++) {
     dbg(`🧠 extract · chunk ${i + 1}/${chunks.length}`);
-    try {
-      const res = await extractChunk(chunks[i], known);
-      mergeInto(acc, res);
-      for (const p of res.projects || [])
-        if (p.key) known.projects.set(p.key, p.name || p.key);
-      for (const d of res.decisions || [])
-        if (d.key) known.decisions.set(d.key, d.summary || d.key);
-    } catch (err) {
-      dbg(`⚠️  extract · chunk ${i + 1}/${chunks.length} failed:`, err);
-    }
+
+    const res = await extractChunk(chunks[i], known);
+    mergeInto(acc, res);
+    for (const p of res.projects || [])
+      if (p.key) known.projects.set(p.key, p.name || p.key);
+    for (const d of res.decisions || [])
+      if (d.key) known.decisions.set(d.key, d.summary || d.key);
   }
   dbg(
     `🧠 extract done · ${acc.people.length} people · ${acc.projects.length} projects · ` +

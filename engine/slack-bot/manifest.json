@@ -14,7 +14,7 @@
         "command": "/ask-graph",
         "description": "Ask who knows about X, or why a decision was made",
         "usage_hint": "who do I talk to about rate limiting?",
-        "should_escape": false
+        "should_escape": true
       },
       {
         "command": "/se3k-ingest",

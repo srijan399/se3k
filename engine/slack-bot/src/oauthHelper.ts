@@ -1,10 +1,41 @@
 import 'dotenv/config';
 import * as http from 'http';
+import * as fs from 'fs';
+import * as path from 'path';
+import * as readline from 'readline';
 import { WebClient } from '@slack/web-api';
+
+// Prompt on the terminal (used when we can't auto-resolve a display name).
+function ask(q: string): Promise<string> {
+  const rl = readline.createInterface({ input: process.stdin, output: process.stdout });
+  return new Promise((res) => rl.question(q, (a) => { rl.close(); res(a.trim()); }));
+}
 
 const PORT = Number(process.env.OAUTH_HELPER_PORT) || 3030;
 const REDIRECT_URI = `http://localhost:${PORT}/callback`;
 const USER_SCOPE = 'chat:write';
+
+const TOKENS_FILE = path.resolve(__dirname, '../seed-users.json');
+const args = process.argv.slice(2);
+const nameIdx = args.indexOf('--name');
+const nameOverride = nameIdx >= 0 ? args[nameIdx + 1] : undefined;
+
+function saveToken(name: string, token: string): void {
+  let data: {
+    users: Record<string, string>;
+    channels?: Record<string, string>;
+  } = {
+    users: {},
+  };
+  if (fs.existsSync(TOKENS_FILE)) {
+    try {
+      data = JSON.parse(fs.readFileSync(TOKENS_FILE, 'utf-8'));
+    } catch {}
+  }
+  if (!data.users) data.users = {};
+  data.users[name] = token;
+  fs.writeFileSync(TOKENS_FILE, JSON.stringify(data, null, 2) + '\n');
+}
 
 const clientId = process.env.SLACK_CLIENT_ID;
 const clientSecret = process.env.SLACK_CLIENT_SECRET;
@@ -75,18 +106,28 @@ const server = http.createServer(async (req, res) => {
     } catch {
       /* best-effort */
     }
-    console.log('\n✅ Got a user token:');
-    console.log(`   name:  ${name}`);
-    console.log(`   id:    ${user.id}`);
-    console.log(`   scope: ${user.scope}`);
-    console.log(`   token: ${user.access_token}`);
+    let finalName = nameOverride || name;
+    // Fell back to the user id → name lookup failed (usually a stale
+    // SLACK_BOT_TOKEN). Ask instead of saving an unusable id key.
+    if (!nameOverride && (!finalName || finalName === user.id)) {
+      console.log(
+        `\n⚠️  couldn't auto-resolve a display name (SLACK_BOT_TOKEN stale / missing users:read).`,
+      );
+      finalName =
+        (await ask('   Name to save this token under (must match your seed file): ')) ||
+        user.id ||
+        '';
+    }
+    saveToken(finalName, user.access_token);
     console.log(
-      `\n   → add to seed-users.json:  "${name}": "${user.access_token}"\n`,
+      `\n✅ Saved token for "${finalName}" (${user.id}) → seed-users.json`,
     );
+    console.log(`   scope: ${user.scope}`);
+    console.log('   Repeat for the next user, or Ctrl-C when done.\n');
     res
       .writeHead(200, { 'Content-Type': 'text/html' })
       .end(
-        `<h2>✅ Token captured for ${name}</h2><p>Copy it from the terminal into seed-users.json, then close this tab.</p>`,
+        `<h2>✅ Saved token for ${finalName}</h2><p>Written to seed-users.json. Authorize the next user, or close this tab.</p>`,
       );
   } catch (e) {
     res.writeHead(500).end('token exchange failed — see terminal');
@@ -97,11 +138,15 @@ const server = http.createServer(async (req, res) => {
 server.listen(PORT, () => {
   console.log(`\nOAuth helper listening on ${REDIRECT_URI}`);
   console.log(
-    '\n1) Log into Slack as the dummy user (use a separate/incognito browser).',
+    '\n1) Log into Slack as each user (separate incognito windows work well).',
   );
-  console.log('2) Open this authorize link in that browser and click Allow:\n');
+  console.log('2) Open this authorize link in that window and click Allow:\n');
   console.log(`   ${authorizeUrl}\n`);
   console.log(
-    '3) The captured xoxp- token prints here. Ctrl-C when done, repeat per user.\n',
+    "3) The token is auto-saved to seed-users.json (keyed by the user's real name).",
+  );
+  console.log('   Keep this running and repeat per user; Ctrl-C when done.');
+  console.log(
+    `   Override the key with a flag if the name differs: pnpm oauth:helper --name "Ivan Sanders"\n`,
   );
 });

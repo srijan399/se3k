@@ -63,7 +63,7 @@ export default function WorkspacesClient({ dashboardKey }: { dashboardKey: strin
       if (!res.ok || !Array.isArray(data)) {
         setBanner(
           `Couldn't load channels for ${teamId}: ${data?.error || res.statusText}. ` +
-            'If you just changed OAuth scopes, reconnect this workspace via "Connect Slack" first.',
+            'If you just changed OAuth scopes, reconnect this workspace via "Add to Slack" first.',
         );
         setChannels((c) => ({ ...c, [teamId]: [] }));
         return;
@@ -113,6 +113,27 @@ export default function WorkspacesClient({ dashboardKey }: { dashboardKey: strin
     if (jobId) poll(teamId, jobId);
   };
 
+  const uninstall = async (teamId: string, teamName: string | null) => {
+    const who = teamName || teamId;
+    if (
+      !confirm(
+        `Uninstall SE3K from ${who}?\n\n` +
+          "This removes SE3K from your Slack workspace and permanently deletes its graph, " +
+          'backfill history, and dedupe records. You can re-add it anytime with "Add to Slack".',
+      )
+    )
+      return;
+    const res = await fetch(`/api/workspaces/${teamId}`, { method: 'DELETE' });
+    if (!res.ok) {
+      const d = await res.json().catch(() => ({}));
+      setBanner(`Couldn't uninstall ${who}: ${d?.error || res.statusText}`);
+      return;
+    }
+    setInstalls((list) => list.filter((i) => i.teamId !== teamId));
+    if (expanded === teamId) setExpanded(null);
+    setBanner(`Uninstalled ${who}.`);
+  };
+
   const dashboardHref = (teamId: string) =>
     dashboardKey ? `/g/${dashboardKey}?team=${encodeURIComponent(teamId)}` : null;
 
@@ -126,11 +147,18 @@ export default function WorkspacesClient({ dashboardKey }: { dashboardKey: strin
         </p>
 
         <div className="mt-6 flex items-center gap-3">
-          <a
-            href="/api/slack/install"
-            className="rounded-lg bg-[#4A154B] px-4 py-2 text-sm font-medium text-white hover:opacity-90"
-          >
-            + Connect Slack
+          {/* Official "Add to Slack" button. Points at our own /api/slack/install
+              route (not the raw slack.com/authorize URL) so the redirect_uri is set
+              to this origin's callback and the requested scopes stay in sync. */}
+          <a href="/api/slack/install" aria-label="Add SE3K to Slack">
+            {/* eslint-disable-next-line @next/next/no-img-element */}
+            <img
+              alt="Add to Slack"
+              height={40}
+              width={139}
+              src="https://platform.slack-edge.com/img/add_to_slack.png"
+              srcSet="https://platform.slack-edge.com/img/add_to_slack.png 1x, https://platform.slack-edge.com/img/add_to_slack@2x.png 2x"
+            />
           </a>
         </div>
 
@@ -144,7 +172,7 @@ export default function WorkspacesClient({ dashboardKey }: { dashboardKey: strin
           {loading && <p className="text-sm text-zinc-500">Loading…</p>}
           {!loading && installs.length === 0 && (
             <p className="text-sm text-zinc-500">
-              No workspaces connected yet — click &ldquo;Connect Slack&rdquo; above.
+              No workspaces connected yet — click &ldquo;Add to Slack&rdquo; above.
             </p>
           )}
           {installs.map((install) => {
@@ -177,6 +205,12 @@ export default function WorkspacesClient({ dashboardKey }: { dashboardKey: strin
                       className="rounded-lg border border-zinc-700 px-3 py-1.5 text-xs hover:border-zinc-500"
                     >
                       {expanded === install.teamId ? 'Close' : 'Backfill'}
+                    </button>
+                    <button
+                      onClick={() => uninstall(install.teamId, install.teamName)}
+                      className="rounded-lg border border-red-900/60 px-3 py-1.5 text-xs text-red-300 hover:border-red-500 hover:text-red-200"
+                    >
+                      Uninstall
                     </button>
                   </div>
                 </div>
@@ -243,6 +277,9 @@ export default function WorkspacesClient({ dashboardKey }: { dashboardKey: strin
                           <>
                             {job.status} · {job.channelsDone}/{job.channelsTotal} channel(s) ·{' '}
                             {job.messagesProcessed} message(s) ingested
+                            {job.error && (
+                              <span className="block text-amber-400">⚠️ {job.error}</span>
+                            )}
                           </>
                         )}
                       </div>

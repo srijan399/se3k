@@ -4,11 +4,6 @@ import { App, LogLevel } from '@slack/bolt';
 import type { WebClient } from '@slack/web-api';
 import { mcp } from './mcpClient';
 
-// @slack/bolt's own middleware-arg types (SlackEventMiddlewareArgs etc.) don't
-// resolve cleanly through this install's rewritten .d.ts re-exports, so these
-// are typed by hand for exactly the fields each handler destructures —
-// consistent with how the rest of this file already treats Slack payloads
-// (manual `as {...}` casts rather than depending on upstream event types).
 interface BoltContext {
   teamId?: string;
   botUserId?: string;
@@ -19,10 +14,6 @@ const dbg = (...args: unknown[]) => console.log('[se3k:bot]', ...args);
 
 const { SLACK_APP_TOKEN, SLACK_SIGNING_SECRET } = process.env;
 
-// ---- Env check --------------------------------------------------------------
-// Fail fast and loud on boot rather than dying later on the first Slack event —
-// on Render a missing-env crash loop is much easier to diagnose from the boot
-// log than from a silent runtime failure.
 const REQUIRED_ENV = ['SLACK_APP_TOKEN', 'SLACK_SIGNING_SECRET'] as const;
 const RECOMMENDED_ENV = ['MCP_SERVER_URL', 'INTERNAL_API_SECRET'] as const;
 
@@ -38,7 +29,9 @@ if (missingRecommended.length > 0) {
   );
 }
 
-const MCP_HTTP_BASE = (process.env.MCP_SERVER_URL || 'http://localhost:4000').replace(/\/$/, '');
+const MCP_HTTP_BASE = (
+  process.env.MCP_SERVER_URL || 'http://localhost:4000'
+).replace(/\/$/, '');
 const INTERNAL_API_SECRET = process.env.INTERNAL_API_SECRET;
 
 // ---- Multi-workspace install lookup ----------------------------------------
@@ -55,7 +48,10 @@ interface Installation {
   botUserId: string | null;
 }
 
-const installationCache = new Map<string, { install: Installation; fetchedAt: number }>();
+const installationCache = new Map<
+  string,
+  { install: Installation; fetchedAt: number }
+>();
 const INSTALL_CACHE_TTL_MS = 60_000;
 
 async function fetchInstallation(teamId: string): Promise<Installation> {
@@ -66,11 +62,15 @@ async function fetchInstallation(teamId: string): Promise<Installation> {
   const res = await fetch(
     `${MCP_HTTP_BASE}/internal/installations/${encodeURIComponent(teamId)}`,
     {
-      headers: INTERNAL_API_SECRET ? { 'x-internal-secret': INTERNAL_API_SECRET } : undefined,
+      headers: INTERNAL_API_SECRET
+        ? { 'x-internal-secret': INTERNAL_API_SECRET }
+        : undefined,
     },
   );
   if (!res.ok) {
-    throw new Error(`no installation found for team ${teamId} (HTTP ${res.status})`);
+    throw new Error(
+      `no installation found for team ${teamId} (HTTP ${res.status})`,
+    );
   }
   const install = (await res.json()) as Installation;
   installationCache.set(teamId, { install, fetchedAt: Date.now() });
@@ -146,7 +146,10 @@ function stateFor(teamId: string): TeamState {
 // warm Person nodes with real Slack user ids. Runs lazily on the first event
 // we see from a team, since there's no single global app.start() bootstrap
 // anymore.
-async function ensureBootstrapped(client: WebClient, teamId: string): Promise<void> {
+async function ensureBootstrapped(
+  client: WebClient,
+  teamId: string,
+): Promise<void> {
   const state = stateFor(teamId);
   if (state.bootstrapped) return;
   state.bootstrapped = true;
@@ -178,7 +181,11 @@ async function ensureBootstrapped(client: WebClient, teamId: string): Promise<vo
     const out = await mcp.setPersonIds(teamId, ids);
     dbg(`👥 team ${teamId} · ${out}`);
   } catch (err) {
-    console.error('[se3k:bot] users.list / setPersonIds failed for team', teamId, err);
+    console.error(
+      '[se3k:bot] users.list / setPersonIds failed for team',
+      teamId,
+      err,
+    );
   }
 }
 
@@ -228,7 +235,11 @@ async function resolveChannelName(
 }
 
 // Build a direct link to the exact Slack message (the proof behind a citation).
-function permalinkFor(teamId: string, channelId: string, ts?: string): string | undefined {
+function permalinkFor(
+  teamId: string,
+  channelId: string,
+  ts?: string,
+): string | undefined {
   const teamUrl = stateFor(teamId).teamUrl;
   if (!teamUrl || !ts) return undefined;
   return `${teamUrl}archives/${channelId}/p${ts.replace('.', '')}`;
@@ -238,12 +249,19 @@ function permalinkFor(teamId: string, channelId: string, ts?: string): string | 
 function dashboardLink(teamId: string): string {
   const key = process.env.DASHBOARD_KEY;
   if (!key) return '';
-  const base = (process.env.GATEWAY_URL || 'http://localhost:3000').replace(/\/$/, '');
+  const base = (process.env.GATEWAY_URL || 'http://localhost:3000').replace(
+    /\/$/,
+    '',
+  );
   return `\n🔗 View the live graph: ${base}/g/${key}?team=${encodeURIComponent(teamId)}`;
 }
 
 // Drop lines with no expertise signal before they ever hit the LLM.
-function isNoise(text: string, userId: string | undefined, botUserId: string | undefined): boolean {
+function isNoise(
+  text: string,
+  userId: string | undefined,
+  botUserId: string | undefined,
+): boolean {
   if (!text) return true;
   if (userId && botUserId && userId === botUserId) return true; // our own replies
   const t = text.trim();
@@ -278,7 +296,10 @@ async function flush(client: WebClient, teamId: string, channelId: string) {
   if (!entries || entries.length === 0) return;
   state.buffers.set(channelId, []);
   const channel = await resolveChannelName(client, teamId, channelId);
-  const refs: Record<string, { ts?: string; permalink?: string; text?: string }> = {};
+  const refs: Record<
+    string,
+    { ts?: string; permalink?: string; text?: string }
+  > = {};
   const authors: Record<string, string> = {}; // display name → Slack id, for @-mentions
   const lines = entries.map((e, i) => {
     const tag = `m${i + 1}`;
@@ -286,13 +307,25 @@ async function flush(client: WebClient, teamId: string, channelId: string) {
     authors[e.name] = e.userId;
     return `[${tag}] ${e.name}: ${e.text}`;
   });
-  dbg(`📤 flushing ${entries.length} msgs from #${channel} (team ${teamId}) → brain`);
+  dbg(
+    `📤 flushing ${entries.length} msgs from #${channel} (team ${teamId}) → brain`,
+  );
   try {
-    await mcp.ingest(teamId, lines.join('\n'), `#${channel}`, channelId, refs, authors);
+    await mcp.ingest(
+      teamId,
+      lines.join('\n'),
+      `#${channel}`,
+      channelId,
+      refs,
+      authors,
+    );
     dbg(`📥 ingested ${entries.length} msgs from #${channel}`);
   } catch (err) {
     console.error('[se3k:bot] ingest failed (re-queuing):', err);
-    state.buffers.set(channelId, [...entries, ...(state.buffers.get(channelId) || [])]);
+    state.buffers.set(channelId, [
+      ...entries,
+      ...(state.buffers.get(channelId) || []),
+    ]);
   }
 }
 
@@ -337,7 +370,9 @@ async function backfill(
   channelId: string,
   limit = BACKFILL_LIMIT,
 ): Promise<number> {
-  dbg(`🕓 backfill · pulling up to ${limit} msgs from ${channelId} (team ${teamId})`);
+  dbg(
+    `🕓 backfill · pulling up to ${limit} msgs from ${channelId} (team ${teamId})`,
+  );
   try {
     const res = await client.conversations.history({
       channel: channelId,
@@ -352,7 +387,8 @@ async function backfill(
     let n = 0;
     for (const m of msgs.reverse()) {
       // oldest first
-      if (m.subtype || !m.user || !m.text || isNoise(m.text, m.user, undefined)) continue;
+      if (m.subtype || !m.user || !m.text || isNoise(m.text, m.user, undefined))
+        continue;
       await bufferMessage(client, teamId, channelId, m.user, m.text, m.ts);
       n++;
     }
@@ -383,129 +419,157 @@ async function answer(teamId: string, question: string): Promise<string> {
 
 // ---- Events ----------------------------------------------------------------
 
-app.message(async ({
-  message,
-  context,
-  client,
-}: {
-  message: unknown;
-  context: BoltContext;
-  client: WebClient;
-}) => {
-  const teamId = context.teamId;
-  if (!teamId) return;
-  const m = message as {
-    subtype?: string;
-    user?: string;
-    text?: string;
-    channel?: string;
-    ts?: string;
-  };
-  if (m.subtype || !m.user || !m.text || !m.channel) return;
-  if (context.botUserId && m.text.includes(`<@${context.botUserId}>`)) return; // question to the bot, not content
-  if (isNoise(m.text, m.user, context.botUserId as string | undefined)) return;
+app.message(
+  async ({
+    message,
+    context,
+    client,
+  }: {
+    message: unknown;
+    context: BoltContext;
+    client: WebClient;
+  }) => {
+    const teamId = context.teamId;
+    if (!teamId) return;
+    const m = message as {
+      subtype?: string;
+      user?: string;
+      text?: string;
+      channel?: string;
+      ts?: string;
+    };
+    if (m.subtype || !m.user || !m.text || !m.channel) return;
+    if (context.botUserId && m.text.includes(`<@${context.botUserId}>`)) return; // question to the bot, not content
+    if (isNoise(m.text, m.user, context.botUserId as string | undefined))
+      return;
 
-  void ensureBootstrapped(client, teamId);
+    // Await: permalinkFor() (called during buffering below) needs state.teamUrl,
+    // which ensureBootstrapped sets. Fire-and-forget here means the first
+    // messages get buffered with no permalink → unlinked citations.
+    await ensureBootstrapped(client, teamId);
 
-  // First time we see a channel, lazily backfill its history (covers channels
-  // the bot was already in before member_joined_channel was subscribed).
-  const state = stateFor(teamId);
-  if (!state.backfilledChannels.has(m.channel)) {
-    state.backfilledChannels.add(m.channel);
-    dbg(`first message seen in ${m.channel} (team ${teamId}) → lazy backfill`);
-    void backfill(client, teamId, m.channel);
-  }
-  await bufferMessage(client, teamId, m.channel, m.user, m.text, m.ts);
-});
+    // First time we see a channel, lazily backfill its history (covers channels
+    // the bot was already in before member_joined_channel was subscribed).
+    const state = stateFor(teamId);
+    if (!state.backfilledChannels.has(m.channel)) {
+      state.backfilledChannels.add(m.channel);
+      dbg(
+        `first message seen in ${m.channel} (team ${teamId}) → lazy backfill`,
+      );
+      void backfill(client, teamId, m.channel);
+    }
+    await bufferMessage(client, teamId, m.channel, m.user, m.text, m.ts);
+  },
+);
 
-app.event('member_joined_channel', async ({
-  event,
-  context,
-  client,
-}: {
-  event: unknown;
-  context: BoltContext;
-  client: WebClient;
-}) => {
-  const teamId = context.teamId;
-  if (!teamId) return;
-  const e = event as { user?: string; channel?: string };
-  if (!e.channel || e.user !== context.botUserId) return; // only react to the bot's own join
-  const state = stateFor(teamId);
-  if (state.backfilledChannels.has(e.channel)) return;
-  dbg(`bot joined ${e.channel} (team ${teamId}) → backfilling`);
-  state.backfilledChannels.add(e.channel);
-  void ensureBootstrapped(client, teamId);
-  await backfill(client, teamId, e.channel);
-});
+app.event(
+  'member_joined_channel',
+  async ({
+    event,
+    context,
+    client,
+  }: {
+    event: unknown;
+    context: BoltContext;
+    client: WebClient;
+  }) => {
+    const teamId = context.teamId;
+    if (!teamId) return;
+    const e = event as { user?: string; channel?: string };
+    if (!e.channel || e.user !== context.botUserId) return; // only react to the bot's own join
+    const state = stateFor(teamId);
+    if (state.backfilledChannels.has(e.channel)) return;
+    dbg(`bot joined ${e.channel} (team ${teamId}) → backfilling`);
+    state.backfilledChannels.add(e.channel);
+    await ensureBootstrapped(client, teamId); // must finish first so permalinks resolve
+    await backfill(client, teamId, e.channel);
+  },
+);
 
-app.command('/ask-graph', async ({ command, ack, respond, context, client }) => {
-  await ack();
-  const teamId = context.teamId!;
-  void ensureBootstrapped(client, teamId);
-  dbg(`⌨️  /ask-graph · team ${teamId} · "${command.text}"`);
-  const reply = await answer(teamId, command.text);
-  // Slack hides the slash-command invocation, so echo the question back — the
-  // channel only sees our reply otherwise.
-  const question = command.text.trim();
-  const text = question
-    ? `> <@${command.user_id}> asked: *${question}*\n\n${reply}`
-    : reply;
-  await respond({ text, response_type: 'in_channel' });
-});
+app.command(
+  '/ask-graph',
+  async ({ command, ack, respond, context, client }) => {
+    await ack();
+    const teamId = context.teamId!;
+    void ensureBootstrapped(client, teamId);
+    dbg(`⌨️  /ask-graph · team ${teamId} · "${command.text}"`);
+    const reply = await answer(teamId, command.text);
+    // Slack hides the slash-command invocation, so echo the question back — the
+    // channel only sees our reply otherwise.
+    const question = command.text.trim();
+    const text = question
+      ? `> <@${command.user_id}> asked: *${question}*\n\n${reply}`
+      : reply;
+    await respond({ text, response_type: 'in_channel' });
+  },
+);
 
-app.command('/se3k-ingest', async ({ command, ack, respond, context, client }) => {
-  await ack();
-  const teamId = context.teamId!;
-  dbg(`/se3k-ingest · team ${teamId} · ${command.channel_id}`);
-  await flush(client, teamId, command.channel_id);
-  await respond({
-    text: '✅ Flushed pending messages into the knowledge graph.',
-    response_type: 'ephemeral',
-  });
-});
+app.command(
+  '/se3k-ingest',
+  async ({ command, ack, respond, context, client }) => {
+    await ack();
+    const teamId = context.teamId!;
+    dbg(`/se3k-ingest · team ${teamId} · ${command.channel_id}`);
+    await flush(client, teamId, command.channel_id);
+    await respond({
+      text: '✅ Flushed pending messages into the knowledge graph.',
+      response_type: 'ephemeral',
+    });
+  },
+);
 
-app.command('/se3k-backfill', async ({ command, ack, respond, context, client }) => {
-  await ack();
-  const teamId = context.teamId!;
-  const count = parseInt(command.text.trim(), 10) || BACKFILL_LIMIT;
-  dbg(`⌨️  /se3k-backfill ${count} · team ${teamId} · ${command.channel_id}`);
-  stateFor(teamId).backfilledChannels.add(command.channel_id);
-  const n = await backfill(client, teamId, command.channel_id, count);
-  await respond({
-    text: `🕓 Backfilled ${n} messages from this channel into the graph.${dashboardLink(teamId)}`,
-    response_type: 'ephemeral',
-  });
-});
+app.command(
+  '/se3k-backfill',
+  async ({ command, ack, respond, context, client }) => {
+    await ack();
+    const teamId = context.teamId!;
+    const count = parseInt(command.text.trim(), 10) || BACKFILL_LIMIT;
+    dbg(`⌨️  /se3k-backfill ${count} · team ${teamId} · ${command.channel_id}`);
+    // Without this, a backfill triggered before any other event means teamUrl is
+    // unset → every backfilled message gets an unlinked citation.
+    await ensureBootstrapped(client, teamId);
+    stateFor(teamId).backfilledChannels.add(command.channel_id);
+    const n = await backfill(client, teamId, command.channel_id, count);
+    await respond({
+      text: `🕓 Backfilled ${n} messages from this channel into the graph.${dashboardLink(teamId)}`,
+      response_type: 'ephemeral',
+    });
+  },
+);
 
-app.event('app_mention', async ({
-  event,
-  say,
-  context,
-  client,
-}: {
-  event: unknown;
-  say: Say;
-  context: BoltContext;
-  client: WebClient;
-}) => {
-  const teamId = context.teamId;
-  if (!teamId) return;
-  void ensureBootstrapped(client, teamId);
-  const botUserId = context.botUserId as string | undefined;
-  const e = event as { text?: string; ts?: string; thread_ts?: string };
-  // Strip only OUR mention — keep any other <@user> mentions so the brain can
-  // answer person-scoped questions like "what is @Rahul working on?".
-  const raw = e.text || '';
-  const text = (
-    botUserId ? raw.split(`<@${botUserId}>`).join(' ') : raw.replace(/^\s*<@[^>]+>/, '')
-  )
-    .replace(/\s+/g, ' ')
-    .trim();
-  dbg(`📣 @se3k · team ${teamId} · "${text}"`);
-  const reply = await answer(teamId, text);
-  await say({ text: reply, thread_ts: e.thread_ts || e.ts });
-});
+app.event(
+  'app_mention',
+  async ({
+    event,
+    say,
+    context,
+    client,
+  }: {
+    event: unknown;
+    say: Say;
+    context: BoltContext;
+    client: WebClient;
+  }) => {
+    const teamId = context.teamId;
+    if (!teamId) return;
+    void ensureBootstrapped(client, teamId);
+    const botUserId = context.botUserId as string | undefined;
+    const e = event as { text?: string; ts?: string; thread_ts?: string };
+    // Strip only OUR mention — keep any other <@user> mentions so the brain can
+    // answer person-scoped questions like "what is @Rahul working on?".
+    const raw = e.text || '';
+    const text = (
+      botUserId
+        ? raw.split(`<@${botUserId}>`).join(' ')
+        : raw.replace(/^\s*<@[^>]+>/, '')
+    )
+      .replace(/\s+/g, ' ')
+      .trim();
+    dbg(`📣 @se3k · team ${teamId} · "${text}"`);
+    const reply = await answer(teamId, text);
+    await say({ text: reply, thread_ts: e.thread_ts || e.ts });
+  },
+);
 
 // ---- Health endpoint --------------------------------------------------------
 // The bot itself talks to Slack over Socket Mode (outbound only), so it has no

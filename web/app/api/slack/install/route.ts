@@ -20,7 +20,12 @@ export async function GET(req: NextRequest) {
       { status: 500 },
     );
   }
-  const redirectUri = `${new URL(req.url).origin}/api/slack/oauth/callback`;
+
+  const base = (process.env.APP_BASE_URL || new URL(req.url).origin).replace(
+    /\/$/,
+    '',
+  );
+  const redirectUri = `${base}/api/slack/oauth/callback`;
   const url = new URL('https://slack.com/oauth/v2/authorize');
   url.searchParams.set('client_id', clientId);
   url.searchParams.set('scope', SCOPES);
