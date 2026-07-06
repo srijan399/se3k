@@ -1,12 +1,6 @@
 import { Client } from '@modelcontextprotocol/sdk/client/index.js';
 import { StreamableHTTPClientTransport } from '@modelcontextprotocol/sdk/client/streamableHttp.js';
 
-// The Slack bot talks to the SE3K brain as a genuine MCP client, now over
-// Streamable HTTP against a persistently-running mcp-server process (rather
-// than spawning it over stdio) — the switch that lets `web` also reach the
-// same process via REST for OAuth installs + backfill.
-// This is where the "MCP server integration" judging criterion actually lives.
-
 const dbg = (...args: unknown[]) => console.log('[se3k:mcpClient]', ...args);
 
 const MCP_SERVER_URL = process.env.MCP_SERVER_URL || 'http://localhost:4000';
@@ -56,11 +50,31 @@ export interface MessageRefs {
   [tag: string]: { ts?: string; permalink?: string; text?: string };
 }
 
-// Every call is scoped to a Slack team id — the graph, install lookups, and
-// idempotency table are all partitioned by it on the mcp-server side.
+// Structured answer from ask_graph: the answer text and its citation lines,
+// kept separate so the bot can render them as Block Kit blocks.
+export interface AskResult {
+  text: string;
+  sources: string[]; // each an mrkdwn <url|label> line
+  kind: string;
+}
+
 export const mcp = {
-  ask: (teamId: string, question: string) =>
-    callTool('ask_graph', { teamId, question }),
+  ask: async (teamId: string, question: string): Promise<AskResult> => {
+    const raw = await callTool('ask_graph', { teamId, question });
+    try {
+      const p = JSON.parse(raw) as Partial<AskResult>;
+      if (p && typeof p.text === 'string') {
+        return {
+          text: p.text,
+          sources: Array.isArray(p.sources) ? p.sources : [],
+          kind: p.kind || 'unknown',
+        };
+      }
+    } catch {
+      /* not JSON — fall through to plain-string handling */
+    }
+    return { text: raw, sources: [], kind: 'unknown' };
+  },
   ingest: (
     teamId: string,
     messages: string,

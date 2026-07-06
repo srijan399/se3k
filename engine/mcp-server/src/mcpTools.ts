@@ -4,7 +4,7 @@ import { GraphStore } from './graph/store';
 import { MessageRefs } from './graph/types';
 import { filterProcessed, markProcessed } from './ingest/dedupe';
 import { extractGraph } from './llm/extract';
-import { answerQuestion, formatSourcesForSlack } from './llm/answer';
+import { answerQuestion, sourceLines } from './llm/answer';
 import { seed } from './seed';
 
 const dbg = (...args: unknown[]) => console.error('[se3k:mcp]', ...args);
@@ -144,9 +144,18 @@ export function createMcpServer(): McpServer {
       const store = await GraphStore.forTeam(teamId);
       const ans = await answerQuestion(store, question);
       dbg(`💬 answered · ${ans.kind} · ${ans.sources.length} source(s)\n`);
+      // Structured payload so the Slack bot can lay out answer + sources as
+      // Block Kit blocks. (The CLI calls answerQuestion directly, not this tool.)
       return {
         content: [
-          { type: 'text', text: ans.text + formatSourcesForSlack(ans.sources) },
+          {
+            type: 'text',
+            text: JSON.stringify({
+              text: ans.text,
+              sources: sourceLines(ans.sources),
+              kind: ans.kind,
+            }),
+          },
         ],
       };
     },

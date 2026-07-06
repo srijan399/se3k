@@ -1,14 +1,19 @@
 import 'dotenv/config';
 import http from 'node:http';
 import { App, LogLevel } from '@slack/bolt';
+import type { types as slack } from '@slack/bolt';
 import type { WebClient } from '@slack/web-api';
-import { mcp } from './mcpClient';
+import { mcp, AskResult } from './mcpClient';
 
 interface BoltContext {
   teamId?: string;
   botUserId?: string;
 }
-type Say = (msg: { text: string; thread_ts?: string }) => Promise<unknown>;
+type Say = (msg: {
+  text: string;
+  blocks?: unknown[];
+  thread_ts?: string;
+}) => Promise<unknown>;
 
 const dbg = (...args: unknown[]) => console.log('[se3k:bot]', ...args);
 
@@ -245,15 +250,63 @@ function permalinkFor(
   return `${teamUrl}archives/${channelId}/p${ts.replace('.', '')}`;
 }
 
-// Key-gated link to this workspace's graph in the web dashboard.
-function dashboardLink(teamId: string): string {
+// Bare key-gated URL to this workspace's graph in the web dashboard (or null if
+// no DASHBOARD_KEY). Used for the Block Kit "View live graph" button.
+function dashboardUrl(teamId: string): string | null {
   const key = process.env.DASHBOARD_KEY;
-  if (!key) return '';
+  if (!key) return null;
   const base = (process.env.GATEWAY_URL || 'http://localhost:3000').replace(
     /\/$/,
     '',
   );
-  return `\n🔗 View the live graph: ${base}/g/${key}?team=${encodeURIComponent(teamId)}`;
+  return `${base}/g/${key}?team=${encodeURIComponent(teamId)}`;
+}
+
+// Key-gated link to this workspace's graph in the web dashboard.
+function dashboardLink(teamId: string): string {
+  const url = dashboardUrl(teamId);
+  return url ? `\n🔗 View the live graph: ${url}` : '';
+}
+
+// Build a Block Kit message for an answer: optional question echo (ask-graph),
+// the answer in a section, then sources as small grey context blocks. Always
+// returns a top-level `text` fallback for notifications + screen readers.
+function buildAnswerBlocks(opts: {
+  answerText: string;
+  sources: string[];
+  askerId?: string;
+  question?: string;
+}): { blocks: unknown[]; text: string } {
+  const { answerText, sources, askerId, question } = opts;
+  const blocks: unknown[] = [];
+
+  if (askerId && question) {
+    blocks.push({
+      type: 'context',
+      elements: [
+        { type: 'mrkdwn', text: `<@${askerId}> asked: *${question}*` },
+      ],
+    });
+  }
+
+  blocks.push({
+    type: 'section',
+    text: { type: 'mrkdwn', text: answerText },
+  });
+
+  if (sources.length) {
+    blocks.push({ type: 'divider' });
+    blocks.push({
+      type: 'context',
+      elements: [{ type: 'mrkdwn', text: '📎 *Sources*' }],
+    });
+    blocks.push({
+      type: 'context',
+      elements: [{ type: 'mrkdwn', text: sources.join('\n') }],
+    });
+  }
+
+  return { blocks, text: answerText };
 }
 
 // Drop lines with no expertise signal before they ever hit the LLM.
@@ -402,9 +455,13 @@ async function backfill(
 }
 
 // Route a question through the MCP ask_graph tool.
-async function answer(teamId: string, question: string): Promise<string> {
+async function answer(teamId: string, question: string): Promise<AskResult> {
   if (!question.trim()) {
-    return 'Ask me *who actually knows about X* (expertise routing) or *why we decided X* (decision provenance). Example: `/ask-graph who do I talk to about the checkout timeouts?`';
+    return {
+      text: 'Ask me *who actually knows about X* (expertise routing) or *why we decided X* (decision provenance). Example: `/ask-graph who do I talk to about the checkout timeouts?`',
+      sources: [],
+      kind: 'unknown',
+    };
   }
   dbg(`❓ team ${teamId} · "${question}"`);
   try {
@@ -413,7 +470,11 @@ async function answer(teamId: string, question: string): Promise<string> {
     return reply;
   } catch (err) {
     console.error('[se3k:bot] ask failed:', err);
-    return "Sorry — I couldn't reach the knowledge graph just now.";
+    return {
+      text: "Sorry — I couldn't reach the knowledge graph just now.",
+      sources: [],
+      kind: 'unknown',
+    };
   }
 }
 
@@ -494,13 +555,20 @@ app.command(
     void ensureBootstrapped(client, teamId);
     dbg(`⌨️  /ask-graph · team ${teamId} · "${command.text}"`);
     const reply = await answer(teamId, command.text);
-    // Slack hides the slash-command invocation, so echo the question back — the
-    // channel only sees our reply otherwise.
+    // Slack hides the slash-command invocation, so echo the question back (as a
+    // context block) — the channel only sees our reply otherwise.
     const question = command.text.trim();
-    const text = question
-      ? `> <@${command.user_id}> asked: *${question}*\n\n${reply}`
-      : reply;
-    await respond({ text, response_type: 'in_channel' });
+    const { blocks, text } = buildAnswerBlocks({
+      answerText: reply.text,
+      sources: reply.sources,
+      askerId: question ? command.user_id : undefined,
+      question: question || undefined,
+    });
+    await respond({
+      blocks: blocks as slack.KnownBlock[],
+      text,
+      response_type: 'in_channel',
+    });
   },
 );
 
@@ -511,8 +579,12 @@ app.command(
     const teamId = context.teamId!;
     dbg(`/se3k-ingest · team ${teamId} · ${command.channel_id}`);
     await flush(client, teamId, command.channel_id);
+    const flushedText = '✅ Flushed pending messages into the knowledge graph.';
     await respond({
-      text: '✅ Flushed pending messages into the knowledge graph.',
+      text: flushedText,
+      blocks: [
+        { type: 'section', text: { type: 'mrkdwn', text: flushedText } },
+      ],
       response_type: 'ephemeral',
     });
   },
@@ -530,8 +602,27 @@ app.command(
     await ensureBootstrapped(client, teamId);
     stateFor(teamId).backfilledChannels.add(command.channel_id);
     const n = await backfill(client, teamId, command.channel_id, count);
+    const backfillText = `🕓 Backfilled ${n} messages from this channel into the graph.`;
+    const url = dashboardUrl(teamId);
+    const blocks: unknown[] = [
+      { type: 'section', text: { type: 'mrkdwn', text: `*${backfillText}*` } },
+    ];
+    if (url) {
+      blocks.push({
+        type: 'actions',
+        elements: [
+          {
+            type: 'button',
+            text: { type: 'plain_text', text: '📊 View live graph', emoji: true },
+            url,
+            action_id: 'view_graph',
+          },
+        ],
+      });
+    }
     await respond({
-      text: `🕓 Backfilled ${n} messages from this channel into the graph.${dashboardLink(teamId)}`,
+      text: `${backfillText}${dashboardLink(teamId)}`,
+      blocks: blocks as slack.KnownBlock[],
       response_type: 'ephemeral',
     });
   },
@@ -567,7 +658,11 @@ app.event(
       .trim();
     dbg(`📣 @se3k · team ${teamId} · "${text}"`);
     const reply = await answer(teamId, text);
-    await say({ text: reply, thread_ts: e.thread_ts || e.ts });
+    const { blocks, text: fallback } = buildAnswerBlocks({
+      answerText: reply.text,
+      sources: reply.sources,
+    });
+    await say({ text: fallback, blocks, thread_ts: e.thread_ts || e.ts });
   },
 );
 
@@ -586,6 +681,12 @@ const healthServer = http.createServer((req, res) => {
   }
   res.writeHead(404);
   res.end();
+});
+
+// URL buttons still deliver a block_actions payload that must be acked, or Slack
+// shows the user a "this app isn't responding" warning. The link opens client-side.
+app.action('view_graph', async ({ ack }: { ack: () => Promise<void> }) => {
+  await ack();
 });
 
 (async () => {

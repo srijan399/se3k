@@ -461,18 +461,16 @@ async function computeAnswer(
   return { kind, text: renderForSlack(text, people), sources };
 }
 
-// Append the citation list the UI shows under an answer (deduped, capped at 5).
-export function formatSourcesForSlack(sources: Source[]): string {
+export function sourceLines(sources: Source[]): string[] {
   const unique = sources.filter(
     (s, i, arr) =>
       arr.findIndex((o) => o.excerpt === s.excerpt && o.ts === s.ts) === i,
   );
-  if (unique.length === 0) return '';
-  return (
-    '\n\n*Sources:*\n' +
-    unique
-      .slice(0, 5)
-      .map((s) => fmtSource(s))
-      .join('\n')
-  );
+  return unique.slice(0, 5).map((s) => fmtSource(s));
+}
+
+export function formatSourcesForSlack(sources: Source[]): string {
+  const lines = sourceLines(sources);
+  if (lines.length === 0) return '';
+  return '\n\n*Sources:*\n' + lines.join('\n');
 }
