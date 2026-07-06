@@ -9,13 +9,18 @@ import { isNoise } from './noise';
 
 const dbg = (...args: unknown[]) => console.error('[se3k:backfill]', ...args);
 
+// Simple, hackathon-appropriate rate-limit backoff between paginated Slack
+// calls — not tuned against real Tier limits, just enough to not get 429'd
+// on a multi-thousand-message history pull.
 const PAGE_DELAY_MS = 1200;
-const BATCH_SIZE = 20;
+const BATCH_SIZE = 20; // messages per extraction batch
 
 function sleep(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
+// Direct link to a Slack message, e.g. https://team.slack.com/archives/C123/p1720000000123456
+// Matches the live bot's permalink format so backfilled citations are clickable too.
 function permalinkFor(
   teamUrl: string | undefined,
   channelId: string,

@@ -59,10 +59,49 @@ function renderForSlack(text: string, people: GraphNode[]): string {
 
 function fmtSource(s: Source): string {
   const where = s.channel || 'Slack';
-  const quote = s.excerpt ? ` — "${s.excerpt}"` : '';
+  const clean = (s.excerpt || '')
+    .replace(/[<>|]/g, '')
+    .replace(/\s+/g, ' ')
+    .trim();
+  const quote = clean ? ` — "${clean.slice(0, 80)}"` : '';
   const label = `${where}${quote}`;
   if (s.permalink) return `<${s.permalink}|${label}>`;
   return `${where}${s.ts ? ` @ ${s.ts}` : ''}${quote}`;
+}
+
+const HELP_TEXT = [
+  "Hi! I'm SE3K. I track who *actually* knows things here from real Slack activity, not who's formally assigned. Try:",
+  '• *who do I talk to about <topic>?* — the person with the deepest hands-on involvement, with receipts',
+  '• *why did we decide <X>?* — the reasoning and dissent behind a call',
+  '• *what is @someone working on?* — one person’s real work',
+  "• *who's doing what?* — a quick team status snapshot",
+].join('\n');
+
+function isSmallTalk(question: string): boolean {
+  const q = question
+    .trim()
+    .toLowerCase()
+    .replace(/[!.?,]+$/g, '');
+  if (!q) return true;
+  if (
+    /^(hi|hey+|hello|yo|sup|hiya|heya|howdy|hallo|hola|gm|good (morning|afternoon|evening)|greetings)\b/.test(
+      q,
+    )
+  )
+    return true;
+  if (
+    /^(thanks|thank you|thx|ty|cheers|nice|cool|great|awesome|ok(ay)?|got it)\b/.test(
+      q,
+    )
+  )
+    return true;
+  if (
+    /^(who are you|what are you|what can you do|what do you do|how do you work|help)\b/.test(
+      q,
+    )
+  )
+    return true;
+  return false;
 }
 
 const ROUTER_SYSTEM = `You route a user's question in a team knowledge graph: label the intent and, when it's about ONE specific thing, pick the matching node id.
@@ -244,11 +283,15 @@ async function overviewAnswer(
   return { kind: 'overview', text: renderForSlack(text, people), sources };
 }
 
-const PHRASE_SYSTEM = `You are SE3K, a Slack knowledge-graph agent. Answer STRICTLY from the grounded facts in the user message — never invent people, projects, quotes, weights, or timestamps that are not present. Be concise, direct, and Slack-friendly: short sentences, **bold** the key person's name. Do NOT write a "Sources" list; the app appends citations separately.
+const PHRASE_SYSTEM = `You are SE3K, a Slack knowledge-graph agent. Answer STRICTLY from the grounded facts in the user message — never invent people, projects, quotes, weights, or timestamps that are not present. The facts you are given ARE what we know: NEVER reply that you "don't have information", "don't know", or "can't help" when facts are present — summarize them instead. If the question is phrased as "what do you know about X", "tell me about X", or "what's the status of X", answer with who has worked on it and what they built or decided. Be concise, direct, and Slack-friendly: short sentences, **bold** the key person's name. Do NOT write a "Sources" list; the app appends citations separately.
 
 EXAMPLE — expertise:
 Facts: "1. Ivan Sanders — score 14.2 (weight 10). Evidence: shipped the PgBouncer fix | debugged pool exhaustion. 2. Adam Reyes — score 1.1 (weight 1). Evidence: I own checkout but I'm slammed."
 Good answer: "**Talk to Ivan Sanders** about the checkout timeouts — he traced the connection-pool root cause and shipped the PgBouncer fix. Adam owns it on paper but handed it off, so he's not your best bet here."
+
+EXAMPLE — "what do you know about X":
+Facts: "1. Ivan Sanders — score 9.0. Evidence: added a Redis cache with write-through invalidation | added a cache-hit-rate dashboard. 2. Rahul Sharma — score 2.0. Evidence: optimistic results render."
+Good answer: "Here's what we know about the cache: **Ivan Sanders** built it — a Redis cache in front of the ranking with write-through invalidation, plus a hit-rate dashboard. Rahul Sharma added the optimistic results render on top."
 
 EXAMPLE — provenance:
 Facts: "Decision: Adopt PgBouncer connection pooling. Concern raised by Adam Reyes: it's one more service to run. Final call made by Ivan Sanders: pool exhaustion was the real outage cause."
@@ -273,6 +316,10 @@ export async function answerQuestion(
   store: GraphStore,
   question: string,
 ): Promise<AnswerResult> {
+  if (isSmallTalk(question)) {
+    dbg(`💬 small-talk · "${question.trim()}" → conversational reply`);
+    return { kind: 'unknown', sources: [], text: HELP_TEXT };
+  }
   const version = store.version();
   const { result, embedding } = await cache.lookup(question, version);
   if (result) return result;
@@ -289,10 +336,20 @@ async function computeAnswer(
   const { intent, node } = await resolveQuery(store, question);
 
   if (intent === 'person') return personAnswer(store, node!, question);
+
+  const mention = question.match(/<@[UW][A-Z0-9]+(?:\|([^>]+))?>/i);
+  if (mention && intent !== 'overview') {
+    const who = mention[1] ? `@${mention[1]}` : 'that person';
+    dbg(`🙈 unresolved person mention → ${who}`);
+    return {
+      kind: 'unknown',
+      sources: [],
+      text: `I don't have any tracked work for ${who} yet — they may not have been active in a channel I've ingested.`,
+    };
+  }
+
   if (intent === 'overview') return overviewAnswer(store, question);
 
-  // Behavior follows the resolved node's type; intent only matters when nothing
-  // resolved.
   const kind: 'expertise' | 'provenance' =
     node?.type === 'Decision'
       ? 'provenance'
@@ -415,7 +472,7 @@ export function formatSourcesForSlack(sources: Source[]): string {
     '\n\n*Sources:*\n' +
     unique
       .slice(0, 5)
-      .map((s) => `• ${fmtSource(s)}`)
+      .map((s) => fmtSource(s))
       .join('\n')
   );
 }

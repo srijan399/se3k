@@ -16,8 +16,12 @@ interface Entry {
 
 const entries: Entry[] = [];
 
+// Matches both <@U123> and the escaped <@U123|display.name> form Slack sends
+// for should_escape slash commands.
 const MENTION_RE = /<@([A-Z0-9]+)(?:\|[^>]+)?>/g;
 
+// Drop every cached answer (in-memory, process-wide). Exposed via
+// POST /internal/cache/clear.
 export function clear(): number {
   const n = entries.length;
   entries.length = 0;
@@ -25,6 +29,10 @@ export function clear(): number {
   return n;
 }
 
+// Embeddings treat "<@U0BDR6CT8F3>" and "<@U0BDT3PHBK6>" as near-identical
+// tokens, so two questions about different people can score above THRESHOLD.
+// Require exact agreement on which users are @-mentioned before trusting
+// the embedding similarity.
 function extractMentions(text: string): string[] {
   return [...text.matchAll(MENTION_RE)].map((m) => m[1]).sort();
 }
@@ -85,13 +93,7 @@ export async function store(
   if (!embeddingsEnabled) return;
   const vec = embedding || (await embed(question));
   if (!vec) return;
-  entries.push({
-    vec,
-    question,
-    result,
-    version,
-    mentions: extractMentions(question),
-  });
+  entries.push({ vec, question, result, version, mentions: extractMentions(question) });
   if (entries.length > MAX) entries.splice(0, entries.length - MAX); // drop oldest
   dbg(`   ↳ cached "${question}" (${entries.length}/${MAX})`);
 }

@@ -9,7 +9,7 @@ import {
   processedMessages,
 } from './db/schema';
 
-// pnpm -C engine/mcp-server reset-graph <teamId>
+//   pnpm -C engine/mcp-server reset-graph <teamId>
 async function main() {
   const teamId = process.argv[2];
 
