@@ -1,5 +1,5 @@
 <p align="center">
-  <img src="web/public/logo.png" alt="SE3K" width="140" />
+  <img src="web/public/logo.png" alt="SE3K" width="500" />
 </p>
 
 # SE3K — _"Who actually knows this?"_
@@ -83,7 +83,7 @@ is I/O — now a persistent, multi-workspace service instead of a single-tenant
 sidecar:
 
 <p align="center">
-  <img src="web/public/Architecture_Se3k.png" alt="SE3K architecture" width="820" />
+  <img src="web/public/Architecture_Se3k.png" alt="SE3K architecture" width="820" height="250"/>
 </p>
 
 - **The bot** (Bolt, Socket Mode) is a genuine **MCP client**: it talks to the brain
@@ -155,7 +155,7 @@ zero tokens. New messages posted? The cache quietly forgets and re-answers fresh
 - **Backfill and live ingestion racing each other.** Once history backfill could
   run as its own job, the same message could get extracted twice — once live,
   once from history — silently doubling its weight. Fixed with a
-  `(team, channel, ts)` idempotency table that only commits *after* a successful
+  `(team, channel, ts)` idempotency table that only commits _after_ a successful
   ingest, so a flaky LLM call skips a batch instead of permanently losing or
   double-counting it.
 
