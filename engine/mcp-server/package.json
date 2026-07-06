@@ -9,6 +9,7 @@
     "start": "node dist/index.js",
     "seed": "ts-node src/seed.ts",
     "ask": "ts-node src/cli.ts",
+    "reset-graph": "ts-node src/resetGraph.ts",
     "db:generate": "drizzle-kit generate",
     "db:push": "drizzle-kit push",
     "db:studio": "drizzle-kit studio",

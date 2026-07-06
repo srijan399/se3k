@@ -6,7 +6,7 @@
   "scripts": {
     "install": "pnpm -C engine/mcp-server install && pnpm -C engine/slack-bot install && pnpm -C web install",
     "build:mcp": "pnpm -C engine/mcp-server build",
-    "setup": "pnpm run install && pnpm run build",
+    "setup": "pnpm run install && pnpm run build:mcp",
     "dev:bot": "pnpm -C engine/slack-bot dev",
     "dev:web": "pnpm -C web dev",
     "build:web": "pnpm -C web build"

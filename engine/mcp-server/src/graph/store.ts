@@ -1,4 +1,4 @@
-import { eq } from 'drizzle-orm';
+import { eq, sql } from 'drizzle-orm';
 import { db } from '../db/client';
 import { graphEdges, graphNodes } from '../db/schema';
 import {
@@ -142,9 +142,7 @@ export class GraphStore {
       `📂 loaded ${this.nodes.size} nodes · ${this.edges.size} edges (team ${this.teamId})`,
     );
   }
-
-  // Full-snapshot overwrite of this team's rows — mirrors the old JSON
-  // file's "write the whole graph" semantics, just against Postgres.
+  
   async saveTeam(): Promise<void> {
     const nodeRows = [...this.nodes.values()].map((n) =>
       nodeToRow(this.teamId, n),
@@ -153,10 +151,37 @@ export class GraphStore {
       edgeToRow(this.teamId, e),
     );
     await db.transaction(async (tx) => {
-      await tx.delete(graphNodes).where(eq(graphNodes.teamId, this.teamId));
-      await tx.delete(graphEdges).where(eq(graphEdges.teamId, this.teamId));
-      if (nodeRows.length) await tx.insert(graphNodes).values(nodeRows);
-      if (edgeRows.length) await tx.insert(graphEdges).values(edgeRows);
+      if (nodeRows.length) {
+        await tx
+          .insert(graphNodes)
+          .values(nodeRows)
+          .onConflictDoUpdate({
+            target: [graphNodes.teamId, graphNodes.id],
+            set: {
+              type: sql`excluded.type`,
+              label: sql`excluded.label`,
+              slackUserId: sql`excluded.slack_user_id`,
+              meta: sql`excluded.meta`,
+            },
+          });
+      }
+      if (edgeRows.length) {
+        await tx
+          .insert(graphEdges)
+          .values(edgeRows)
+          .onConflictDoUpdate({
+            target: [graphEdges.teamId, graphEdges.id],
+            set: {
+              type: sql`excluded.type`,
+              from: sql`excluded.from_id`,
+              to: sql`excluded.to_id`,
+              weight: sql`excluded.weight`,
+              lastActive: sql`excluded.last_active`,
+              sources: sql`excluded.sources`,
+              meta: sql`excluded.meta`,
+            },
+          });
+      }
     });
     dbg(
       `💾 saved ${this.nodes.size} nodes · ${this.edges.size} edges (team ${this.teamId})`,

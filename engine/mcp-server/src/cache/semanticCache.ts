@@ -16,12 +16,15 @@ interface Entry {
 
 const entries: Entry[] = [];
 
-const MENTION_RE = /<@([A-Z0-9]+)>/g;
+const MENTION_RE = /<@([A-Z0-9]+)(?:\|[^>]+)?>/g;
 
-// Embeddings treat "<@U0BDR6CT8F3>" and "<@U0BDT3PHBK6>" as near-identical
-// tokens, so two questions about different people can score above THRESHOLD.
-// Require exact agreement on which users are @-mentioned before trusting
-// the embedding similarity.
+export function clear(): number {
+  const n = entries.length;
+  entries.length = 0;
+  dbg(`🧹 cleared ${n} cached answer(s)`);
+  return n;
+}
+
 function extractMentions(text: string): string[] {
   return [...text.matchAll(MENTION_RE)].map((m) => m[1]).sort();
 }
@@ -82,7 +85,13 @@ export async function store(
   if (!embeddingsEnabled) return;
   const vec = embedding || (await embed(question));
   if (!vec) return;
-  entries.push({ vec, question, result, version, mentions: extractMentions(question) });
+  entries.push({
+    vec,
+    question,
+    result,
+    version,
+    mentions: extractMentions(question),
+  });
   if (entries.length > MAX) entries.splice(0, entries.length - MAX); // drop oldest
   dbg(`   ↳ cached "${question}" (${entries.length}/${MAX})`);
 }

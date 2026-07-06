@@ -3,8 +3,15 @@ import { eq } from 'drizzle-orm';
 import { Router } from 'express';
 import { startBackfillJob } from '../backfill/run';
 import { db } from '../db/client';
-import { backfillJobs, installations } from '../db/schema';
+import {
+  backfillJobs,
+  graphEdges,
+  graphNodes,
+  installations,
+  processedMessages,
+} from '../db/schema';
 import { GraphStore } from '../graph/store';
+import * as cache from '../cache/semanticCache';
 import { asyncHandler } from './asyncHandler';
 import { requireInternalSecret } from './auth';
 
@@ -13,8 +20,6 @@ const dbg = (...args: unknown[]) => console.error('[se3k:rest]', ...args);
 export const rest = Router();
 
 rest.use(requireInternalSecret);
-
-// ---- Installations (web's OAuth callback + workspace picker) --------------
 
 rest.get(
   '/internal/installations',
@@ -63,6 +68,49 @@ rest.post(
       });
     dbg(`installed · team ${teamId} (${teamName || '?'})`);
     res.status(201).json({ ok: true });
+  }),
+);
+
+// Uninstall (data side): delete every team-partitioned row we hold. The Slack-
+// side removal (apps.uninstall) is done by the web route, which is the only
+// place with the client_id/client_secret needed for it — the brain just purges.
+rest.delete(
+  '/internal/installations/:teamId',
+  asyncHandler(async (req, res) => {
+    const { teamId } = req.params;
+    const [install] = await db
+      .select()
+      .from(installations)
+      .where(eq(installations.teamId, teamId));
+    if (!install) {
+      res.status(404).json({ error: 'not found' });
+      return;
+    }
+
+    await db.transaction(async (tx) => {
+      await tx.delete(graphEdges).where(eq(graphEdges.teamId, teamId));
+      await tx.delete(graphNodes).where(eq(graphNodes.teamId, teamId));
+      await tx
+        .delete(processedMessages)
+        .where(eq(processedMessages.teamId, teamId));
+      await tx.delete(backfillJobs).where(eq(backfillJobs.teamId, teamId));
+      await tx.delete(installations).where(eq(installations.teamId, teamId));
+    });
+    dbg(
+      `uninstalled · team ${teamId} (${install.teamName || '?'}) · purged graph + jobs + dedupe`,
+    );
+    res.json({ ok: true });
+  }),
+);
+
+// Clear the in-memory semantic answer cache (e.g. after re-seeding, so old
+// answers can't be replayed). The cache is also version-keyed, so a graph
+// change already invalidates it — this is the explicit escape hatch.
+rest.post(
+  '/internal/cache/clear',
+  asyncHandler(async (_req, res) => {
+    const cleared = cache.clear();
+    res.json({ ok: true, cleared });
   }),
 );
 

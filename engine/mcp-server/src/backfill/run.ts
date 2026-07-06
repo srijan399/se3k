@@ -9,14 +9,21 @@ import { isNoise } from './noise';
 
 const dbg = (...args: unknown[]) => console.error('[se3k:backfill]', ...args);
 
-// Simple, hackathon-appropriate rate-limit backoff between paginated Slack
-// calls — not tuned against real Tier limits, just enough to not get 429'd
-// on a multi-thousand-message history pull.
 const PAGE_DELAY_MS = 1200;
-const BATCH_SIZE = 20; // messages per extraction batch
+const BATCH_SIZE = 20;
 
 function sleep(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+function permalinkFor(
+  teamUrl: string | undefined,
+  channelId: string,
+  ts?: string,
+): string | undefined {
+  if (!teamUrl || !ts) return undefined;
+  const base = teamUrl.endsWith('/') ? teamUrl : `${teamUrl}/`;
+  return `${base}archives/${channelId}/p${ts.replace('.', '')}`;
 }
 
 async function getInstallation(teamId: string) {
@@ -47,21 +54,19 @@ export async function startBackfillJob(
     .values({ teamId, channelIds: channelIds ?? null, status: 'pending' })
     .returning({ id: backfillJobs.id });
 
-  runBackfillJob(job.id, teamId, channelIds, autoJoinPublic).catch(async (err) => {
-    dbg(`job ${job.id} failed:`, err);
-    await setJob(job.id, {
-      status: 'failed',
-      error: String((err as Error)?.message || err),
-    }).catch(() => {});
-  });
+  runBackfillJob(job.id, teamId, channelIds, autoJoinPublic).catch(
+    async (err) => {
+      dbg(`job ${job.id} failed:`, err);
+      await setJob(job.id, {
+        status: 'failed',
+        error: String((err as Error)?.message || err),
+      }).catch(() => {});
+    },
+  );
 
   return job.id;
 }
 
-// Bots can only read history in channels they're a member of. Opt-in
-// convenience for "backfill everything" — joins every public channel the
-// bot isn't already in (needs the channels:join scope). Private channels
-// still need a manual /invite; never auto-joined.
 async function joinAllPublicChannels(client: WebClient): Promise<void> {
   let cursor: string | undefined;
   do {
@@ -132,7 +137,10 @@ async function listTargetChannels(
 
 const userNameCache = new Map<string, string>();
 
-async function resolveUserName(client: WebClient, userId: string): Promise<string> {
+async function resolveUserName(
+  client: WebClient,
+  userId: string,
+): Promise<string> {
   const cached = userNameCache.get(userId);
   if (cached) return cached;
   try {
@@ -160,6 +168,15 @@ async function runBackfillJob(
   const install = await getInstallation(teamId);
   const client = new WebClient(install.botToken);
 
+  // Workspace URL for building message permalinks, so backfilled citations link
+  // to the exact Slack message (the live path already does this). Best-effort.
+  let teamUrl: string | undefined;
+  try {
+    teamUrl = (await client.auth.test()).url as string;
+  } catch {
+    /* no permalinks if this fails — citations still render as plain text */
+  }
+
   if (!channelIds?.length && autoJoinPublic) {
     await joinAllPublicChannels(client);
   }
@@ -169,13 +186,43 @@ async function runBackfillJob(
   dbg(`job ${jobId} · team ${teamId} · ${channels.length} channel(s)`);
 
   let totalMessages = 0;
+  const skipped: string[] = [];
   for (let i = 0; i < channels.length; i++) {
-    totalMessages += await backfillChannel(teamId, client, channels[i]);
-    await setJob(jobId, { channelsDone: i + 1, messagesProcessed: totalMessages });
+    try {
+      totalMessages += await backfillChannel(
+        teamId,
+        client,
+        channels[i],
+        teamUrl,
+      );
+    } catch (err) {
+      const msg = (err as Error)?.message || String(err);
+      const cause = (err as { cause?: { message?: string } })?.cause?.message;
+      dbg(`channel #${channels[i].name} skipped:`, cause || msg);
+      const blob = `${msg} ${cause || ''}`;
+      const reason = /not_in_channel/.test(blob)
+        ? 'invite the bot first'
+        : /rate_limit|429/i.test(blob)
+          ? 'rate-limited, try again shortly'
+          : 'ingest error';
+      skipped.push(`#${channels[i].name} (${reason})`);
+    }
+    await setJob(jobId, {
+      channelsDone: i + 1,
+      messagesProcessed: totalMessages,
+    });
   }
 
-  await setJob(jobId, { status: 'done' });
-  dbg(`job ${jobId} done · ${totalMessages} message(s) across ${channels.length} channel(s)`);
+  const note = skipped.length
+    ? `Skipped ${skipped.length}: ${skipped.join(', ')}`
+    : null;
+  const allFailed = skipped.length > 0 && skipped.length === channels.length;
+  await setJob(jobId, { status: allFailed ? 'failed' : 'done', error: note });
+  dbg(
+    `job ${jobId} ${allFailed ? 'failed' : 'done'} · ${totalMessages} message(s) across ` +
+      `${channels.length - skipped.length}/${channels.length} channel(s)` +
+      (skipped.length ? ` · skipped ${skipped.length}` : ''),
+  );
 }
 
 interface BufEntry {
@@ -185,16 +232,16 @@ interface BufEntry {
   ts?: string;
 }
 
-// Paginates a channel's full history (no BACKFILL_MAX cap — that constant is
-// slack-bot's live-path safety valve, not appropriate here), batching
-// messages into the same [mN]-tagged shape the live bot's flush() builds,
-// and ingesting them directly (same process, no need to go through the MCP
-// tool wrapper).
 async function backfillChannel(
   teamId: string,
   client: WebClient,
   channel: Channel,
+  teamUrl: string | undefined,
 ): Promise<number> {
+  try {
+    await client.conversations.join({ channel: channel.id });
+  } catch {}
+
   let cursor: string | undefined;
   let buffer: BufEntry[] = [];
   let count = 0;
@@ -203,11 +250,18 @@ async function backfillChannel(
     if (!buffer.length) return;
     const entries = buffer;
     buffer = [];
-    const refs: Record<string, { ts?: string; text?: string }> = {};
+    const refs: Record<
+      string,
+      { ts?: string; text?: string; permalink?: string }
+    > = {};
     const authors: Record<string, string> = {};
     const lines = entries.map((e, i) => {
       const tag = `m${i + 1}`;
-      refs[tag] = { ts: e.ts, text: e.text };
+      refs[tag] = {
+        ts: e.ts,
+        text: e.text,
+        permalink: permalinkFor(teamUrl, channel.id, e.ts),
+      };
       authors[e.name] = e.userId;
       return `[${tag}] ${e.name}: ${e.text}`;
     });
