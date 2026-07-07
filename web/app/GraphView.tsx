@@ -1,7 +1,11 @@
 'use client';
 
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties } from 'react';
 import dynamic from 'next/dynamic';
+import Image from 'next/image';
+import Link from 'next/link';
+import { ArrowLeft, Maximize2, Minimize2, X } from 'lucide-react';
+import { sans, mono } from './fonts';
 
 // react-force-graph uses canvas + window, so it must be client-only.
 const ForceGraph2D = dynamic(() => import('react-force-graph-2d'), {
@@ -48,19 +52,147 @@ type FLink = {
   toType: NodeType;
 };
 
+// SE3K brand palette (matches the landing page) rather than the design
+// handoff's own warm-neutral oklch scheme.
+const BG = '#26082A';
+const PANEL_BG = '#2B0A32';
+const BORDER = 'rgba(255,255,255,0.08)';
+const BORDER_STRONG = 'rgba(255,255,255,0.15)';
+const TEXT_PRIMARY = '#F3EAF4';
+const TEXT_SECONDARY = '#D8C6DB';
+const TEXT_MUTED = '#9C889F';
+const TEXT_FAINT = '#7A6A7D';
+
 const COLORS: Record<NodeType, string> = {
   Person: '#36C5F0',
   Project: '#2EB67D',
   Decision: '#ECB22E',
-  Channel: '#9b59b6',
+  Channel: '#E01E5A',
 };
 const TYPES = Object.keys(COLORS) as NodeType[];
+const SHAPE_SHRINK: Record<NodeType, number> = {
+  Person: 1,
+  Project: 1,
+  Decision: 0.82,
+  Channel: 1.05,
+};
 
 const LABEL_AT_SCALE = 1.5; // labels only draw once zoomed past this — kills the clutter
 
 function withAlpha(hex: string, a: number) {
   const n = parseInt(hex.slice(1), 16);
   return `rgba(${(n >> 16) & 255},${(n >> 8) & 255},${n & 255},${a})`;
+}
+
+// CSS swatch for a node's type — mirrors the canvas shape (circle / squircle /
+// diamond / hexagon) so the legend, directory, and detail chips read as the
+// same shape language as the graph itself.
+function shapeSwatchStyle(type: NodeType, size = 10): CSSProperties {
+  const color = COLORS[type];
+  const base: CSSProperties = { display: 'inline-block', flexShrink: 0, background: color };
+  switch (type) {
+    case 'Person':
+      return { ...base, width: size, height: size, borderRadius: '50%' };
+    case 'Project':
+      return { ...base, width: size, height: size, borderRadius: '24%' };
+    case 'Decision':
+      return {
+        ...base,
+        width: size * 0.82,
+        height: size * 0.82,
+        borderRadius: '2px',
+        transform: 'rotate(45deg)',
+      };
+    case 'Channel':
+      return {
+        ...base,
+        width: size * 1.15,
+        height: size * 1.15,
+        clipPath: 'polygon(25% 0%, 75% 0%, 100% 50%, 75% 100%, 25% 100%, 0% 50%)',
+      };
+  }
+}
+
+function roundedRectPath(
+  ctx: CanvasRenderingContext2D,
+  x: number,
+  y: number,
+  w: number,
+  h: number,
+  r: number,
+) {
+  ctx.moveTo(x + r, y);
+  ctx.arcTo(x + w, y, x + w, y + h, r);
+  ctx.arcTo(x + w, y + h, x, y + h, r);
+  ctx.arcTo(x, y + h, x, y, r);
+  ctx.arcTo(x, y, x + w, y, r);
+  ctx.closePath();
+}
+
+// Draws the per-type shape path for a node onto the force-graph canvas.
+// Caller is responsible for beginPath()/fill()/stroke() around this.
+function traceNodeShape(
+  ctx: CanvasRenderingContext2D,
+  type: NodeType,
+  x: number,
+  y: number,
+  r: number,
+) {
+  switch (type) {
+    case 'Person':
+      ctx.arc(x, y, r, 0, 2 * Math.PI);
+      break;
+    case 'Project': {
+      const s = r * 1.7;
+      roundedRectPath(ctx, x - s / 2, y - s / 2, s, s, s * 0.24);
+      break;
+    }
+    case 'Decision': {
+      const s = r * 1.5;
+      ctx.save();
+      ctx.translate(x, y);
+      ctx.rotate(Math.PI / 4);
+      roundedRectPath(ctx, -s / 2, -s / 2, s, s, 2);
+      ctx.restore();
+      break;
+    }
+    case 'Channel': {
+      const pts: [number, number][] = [
+        [-0.5, -1],
+        [0.5, -1],
+        [1, 0],
+        [0.5, 1],
+        [-0.5, 1],
+        [-1, 0],
+      ];
+      pts.forEach(([px, py], i) => {
+        const X = x + px * r;
+        const Y = y + py * r;
+        if (i === 0) ctx.moveTo(X, Y);
+        else ctx.lineTo(X, Y);
+      });
+      ctx.closePath();
+      break;
+    }
+  }
+}
+
+// Missing-data-friendly relative time — every timestamp in this view comes
+// straight from the graph (edge.last_active / source.ts), never hardcoded.
+function relTime(iso: string | undefined | null) {
+  if (!iso) return 'unknown time';
+  const t = new Date(iso).getTime();
+  if (Number.isNaN(t)) return 'unknown time';
+  const diffMin = Math.round((Date.now() - t) / 60000);
+  if (diffMin < 1) return 'just now';
+  if (diffMin < 60) return `${diffMin}m ago`;
+  const hours = Math.round(diffMin / 60);
+  if (hours < 24) return `${hours}h ago`;
+  const days = Math.round(hours / 24);
+  if (days < 30) return `${days}d ago`;
+  const months = Math.round(days / 30);
+  if (months < 12) return `${months}mo ago`;
+  return `${Math.round(months / 12)}y ago`;
 }
 
 export default function GraphView({ teamId }: { teamId: string }) {
@@ -79,6 +211,7 @@ export default function GraphView({ teamId }: { teamId: string }) {
   const [selected, setSelected] = useState<GNode | null>(null);
   const [hidden, setHidden] = useState<Set<NodeType>>(new Set());
   const [query, setQuery] = useState('');
+  const [zen, setZen] = useState(false);
   const [dims, setDims] = useState({ w: 0, h: 0 });
 
   const fgRef = useRef<any>(null);
@@ -238,12 +371,90 @@ export default function GraphView({ teamId }: { teamId: string }) {
   const counts: Record<string, number> = {};
   for (const n of snap.nodes) counts[n.type] = (counts[n.type] || 0) + 1;
 
+  // ---- Data derived straight from the live snapshot: no static/mock content
+  // for the panel. The DB only stores node id/type/label and edge weight +
+  // sources, so "meta", "connected", and "evidence" are all computed here from
+  // whatever edges actually exist for the selected node — with honest fallback
+  // copy when a node has no incident edges or no sourced excerpts yet. -------
+  const edgesByNode = useMemo(() => {
+    const m = new Map<string, GEdge[]>();
+    const push = (id: string, e: GEdge) => {
+      const arr = m.get(id);
+      if (arr) arr.push(e);
+      else m.set(id, [e]);
+    };
+    for (const e of snap.edges) {
+      push(e.from, e);
+      push(e.to, e);
+    }
+    return m;
+  }, [snap.edges]);
+
+  const detailMeta = useMemo(() => {
+    if (!selected) return '';
+    const inc = edgesByNode.get(selected.id) || [];
+    if (inc.length === 0) return 'No recorded connections yet.';
+    const last = inc.reduce((max, e) => {
+      const t = new Date(e.last_active).getTime();
+      return Number.isNaN(t) ? max : Math.max(max, t);
+    }, 0);
+    return `${inc.length} connection${inc.length === 1 ? '' : 's'} · last active ${
+      last ? relTime(new Date(last).toISOString()) : 'unknown time'
+    }`;
+  }, [selected, edgesByNode]);
+
+  const detailConnections = useMemo(() => {
+    if (!selected) return [];
+    const inc = [...(edgesByNode.get(selected.id) || [])].sort(
+      (a, b) => b.weight - a.weight,
+    );
+    const seen = new Set<string>();
+    const list: GNode[] = [];
+    for (const e of inc) {
+      const otherId = e.from === selected.id ? e.to : e.from;
+      if (seen.has(otherId)) continue;
+      seen.add(otherId);
+      const other = snap.nodes.find((n) => n.id === otherId);
+      if (other) list.push(other);
+    }
+    return list;
+  }, [selected, edgesByNode, snap.nodes]);
+
+  const detailEvidence = useMemo(() => {
+    if (!selected) return [];
+    const inc = edgesByNode.get(selected.id) || [];
+    const items: { channel: string; time: string; text: string; ts: number }[] = [];
+    for (const e of inc) {
+      for (const s of e.sources || []) {
+        if (!s.excerpt) continue;
+        const t = s.ts ? new Date(s.ts).getTime() : NaN;
+        items.push({
+          channel: s.channel || 'unknown channel',
+          time: relTime(s.ts),
+          text: s.excerpt,
+          ts: Number.isNaN(t) ? 0 : t,
+        });
+      }
+    }
+    items.sort((a, b) => b.ts - a.ts);
+    return items.slice(0, 6);
+  }, [selected, edgesByNode]);
+
+  const directory = useMemo(
+    () =>
+      TYPES.map((t) => ({
+        type: t,
+        items: snap.nodes.filter((n) => n.type === t).sort((a, b) => a.label.localeCompare(b.label)),
+      })).filter((g) => g.items.length > 0),
+    [snap.nodes],
+  );
+
   // ---- Interaction handlers --------------------------------------------------
   const handleHover = useCallback(
     (node: any) => {
       hoverId.current = node?.id ?? null;
       if (wrapRef.current)
-        wrapRef.current.style.cursor = node ? 'pointer' : 'default';
+        wrapRef.current.style.cursor = node ? 'pointer' : 'grab';
       recomputeHighlight();
     },
     [recomputeHighlight],
@@ -254,6 +465,16 @@ export default function GraphView({ teamId }: { teamId: string }) {
     fgRef.current?.centerAt(n.x, n.y, 600);
     fgRef.current?.zoom(2.4, 600);
   }, []);
+
+  const selectAndFocus = useCallback(
+    (id: string) => {
+      const n = nodeMap.current.get(id);
+      if (!n) return;
+      setSelected(n);
+      focusNode(n);
+    },
+    [focusNode],
+  );
 
   const onSearch = (v: string) => {
     setQuery(v);
@@ -280,221 +501,549 @@ export default function GraphView({ teamId }: { teamId: string }) {
       return next;
     });
 
+  const fit = () => fgRef.current?.zoomToFit(500, 70);
+
+  const sidebarOpen = !zen;
+  const panelOpen = !zen;
+
   return (
     <div
-      ref={wrapRef}
-      className="relative h-[100dvh] w-full overflow-hidden bg-[#0b0b12] text-zinc-100"
+      style={{
+        height: '100dvh',
+        width: '100%',
+        display: 'flex',
+        flexDirection: 'column',
+        overflow: 'hidden',
+        background: BG,
+        color: TEXT_PRIMARY,
+        fontFamily: sans,
+      }}
     >
-      {/* Header: title, search, clickable legend (doubles as a type filter) */}
-      <div className="pointer-events-none absolute inset-x-0 top-0 z-10 flex flex-col gap-3 p-4 sm:p-6">
-        <div>
-          <h1 className="text-xl font-semibold tracking-tight sm:text-2xl">
-            SE3K — Org Knowledge Graph
-          </h1>
-          <p className="hidden text-sm text-zinc-400 sm:block">
-            “Who actually knows this?” — ranked by demonstrated involvement, not
-            assignment.
-          </p>
+      {/* HEADER */}
+      <div
+        style={{
+          flex: 'none',
+          padding: '20px 28px 16px',
+          borderBottom: `1px solid ${BORDER}`,
+          display: 'flex',
+          alignItems: 'flex-start',
+          justifyContent: 'space-between',
+          gap: 16,
+        }}
+      >
+        <div style={{ display: 'flex', alignItems: 'center', gap: 14 }}>
+          <Link
+            href="/workspaces"
+            aria-label="Back to workspaces"
+            title="Back to workspaces"
+            style={{
+              flex: 'none',
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+              width: 36,
+              height: 36,
+              borderRadius: 9,
+              background: 'rgba(255,255,255,0.06)',
+              border: `1px solid ${BORDER_STRONG}`,
+              textDecoration: 'none',
+              color: TEXT_PRIMARY,
+              fontSize: 16,
+              marginRight: 4,
+            }}
+          >
+            <ArrowLeft size={17} strokeWidth={2} />
+          </Link>
+          <Image
+            src="/logo.png"
+            alt="SE3K"
+            width={40}
+            height={40}
+            style={{ width: 40, height: 40, borderRadius: 11 }}
+          />
+          <div>
+            <h1
+              style={{
+                margin: 0,
+                fontSize: 22,
+                fontWeight: 700,
+                color: '#FFFFFF',
+                letterSpacing: '-0.01em',
+              }}
+            >
+              SE3K &mdash; Org Knowledge Graph
+            </h1>
+            <p style={{ margin: '5px 0 0', fontSize: 13, color: TEXT_SECONDARY }}>
+              &ldquo;Who actually knows this?&rdquo; &mdash; ranked by demonstrated
+              involvement, not assignment.
+            </p>
+          </div>
         </div>
+        <button
+          onClick={() => setZen((z) => !z)}
+          style={{
+            flex: 'none',
+            display: 'flex',
+            alignItems: 'center',
+            gap: 7,
+            background: 'rgba(255,255,255,0.06)',
+            border: `1px solid ${BORDER_STRONG}`,
+            color: TEXT_PRIMARY,
+            fontSize: 12.5,
+            fontWeight: 500,
+            padding: '9px 14px',
+            borderRadius: 9,
+            cursor: 'pointer',
+            fontFamily: sans,
+          }}
+        >
+          {zen ? <Minimize2 size={14} /> : <Maximize2 size={14} />}
+          <span>{zen ? 'Exit zen' : 'Zen mode'}</span>
+        </button>
+      </div>
 
-        <div className="flex flex-wrap items-center gap-2 sm:gap-3">
+      {/* BODY: sidebar / canvas / detail panel */}
+      <div style={{ flex: 1, display: 'flex', minHeight: 0 }}>
+        {/* DIRECTORY SIDEBAR */}
+        <div
+          style={{
+            flex: 'none',
+            width: sidebarOpen ? 260 : 0,
+            opacity: sidebarOpen ? 1 : 0,
+            padding: sidebarOpen ? '20px 16px' : '0px',
+            overflow: 'hidden',
+            whiteSpace: 'nowrap',
+            boxSizing: 'border-box',
+            background: PANEL_BG,
+            borderRight: `1px solid ${BORDER}`,
+            display: 'flex',
+            flexDirection: 'column',
+            gap: 18,
+            transition:
+              'width .35s cubic-bezier(.2,.8,.2,1), opacity .25s ease, padding .35s ease',
+          }}
+        >
           <input
             value={query}
             onChange={(e) => onSearch(e.target.value)}
             onKeyDown={(e) => e.key === 'Enter' && focusFirstMatch()}
             placeholder="Search people, projects…"
-            className="pointer-events-auto w-44 rounded-lg border border-zinc-800 bg-zinc-900/80 px-3 py-1.5 text-sm outline-none backdrop-blur placeholder:text-zinc-500 focus:border-zinc-600 sm:w-60"
+            style={{
+              width: '100%',
+              boxSizing: 'border-box',
+              background: BG,
+              border: `1px solid ${BORDER_STRONG}`,
+              borderRadius: 8,
+              padding: '9px 12px',
+              fontSize: 13,
+              color: TEXT_PRIMARY,
+              outline: 'none',
+              fontFamily: sans,
+            }}
           />
-          <button
-            onClick={() => fgRef.current?.zoomToFit(500, 70)}
-            className="pointer-events-auto rounded-lg border border-zinc-800 bg-zinc-900/80 px-3 py-1.5 text-xs text-zinc-300 backdrop-blur hover:border-zinc-600"
-          >
-            Fit
-          </button>
 
-          <div className="flex flex-wrap gap-2">
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
             {TYPES.map((t) => {
               const off = hidden.has(t);
+              const count = counts[t] || 0;
+              const disabled = count === 0;
               return (
                 <button
                   key={t}
-                  onClick={() => toggleType(t)}
-                  className={`pointer-events-auto flex items-center gap-1.5 rounded-full border border-zinc-800 bg-zinc-900/80 px-2.5 py-1 text-xs backdrop-blur transition ${
-                    off ? 'opacity-35' : 'hover:border-zinc-600'
-                  }`}
+                  onClick={() => !disabled && toggleType(t)}
+                  style={{
+                    display: 'flex',
+                    alignItems: 'center',
+                    gap: 8,
+                    width: '100%',
+                    boxSizing: 'border-box',
+                    background: 'rgba(255,255,255,0.05)',
+                    border: `1px solid ${BORDER_STRONG}`,
+                    borderRadius: 8,
+                    padding: '8px 10px',
+                    cursor: disabled ? 'default' : 'pointer',
+                    fontFamily: sans,
+                    opacity: disabled ? 0.35 : off ? 0.4 : 1,
+                  }}
                 >
-                  <span
-                    className="inline-block h-2.5 w-2.5 rounded-full"
-                    style={{ background: COLORS[t] }}
-                  />
-                  <span className={off ? 'line-through' : ''}>{t}</span>
-                  <span className="text-zinc-500">{counts[t] || 0}</span>
+                  <span style={shapeSwatchStyle(t, 10)} />
+                  <span style={{ fontSize: 12.5, fontWeight: 500, color: TEXT_PRIMARY, flex: 1, textAlign: 'left' }}>
+                    {t}
+                  </span>
+                  <span style={{ fontSize: 11, fontFamily: mono, color: TEXT_MUTED }}>{count}</span>
                 </button>
               );
             })}
           </div>
+
+          <button
+            onClick={fit}
+            style={{
+              width: '100%',
+              boxSizing: 'border-box',
+              background: 'rgba(255,255,255,0.07)',
+              border: `1px solid ${BORDER_STRONG}`,
+              color: TEXT_PRIMARY,
+              fontSize: 12.5,
+              fontWeight: 500,
+              padding: '8px 14px',
+              borderRadius: 8,
+              cursor: 'pointer',
+              fontFamily: sans,
+            }}
+          >
+            Fit view
+          </button>
+
+          <div style={{ height: 1, width: '100%', background: BORDER }} />
+
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 16, overflowY: 'auto' }}>
+            {directory.length === 0 && (
+              <p style={{ margin: 0, fontSize: 12.5, color: TEXT_FAINT }}>No nodes yet.</p>
+            )}
+            {directory.map((grp) => (
+              <div key={grp.type}>
+                <div
+                  style={{
+                    fontSize: 11,
+                    fontFamily: mono,
+                    letterSpacing: '.06em',
+                    textTransform: 'uppercase',
+                    color: TEXT_MUTED,
+                    marginBottom: 8,
+                  }}
+                >
+                  {grp.type}
+                </div>
+                <div style={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
+                  {grp.items.map((n) => (
+                    <button
+                      key={n.id}
+                      title={n.label}
+                      onClick={() => selectAndFocus(n.id)}
+                      style={{
+                        display: 'flex',
+                        alignItems: 'center',
+                        gap: 8,
+                        width: '100%',
+                        minWidth: 0,
+                        background: selected?.id === n.id ? 'rgba(255,255,255,0.1)' : 'transparent',
+                        border: 'none',
+                        borderRadius: 7,
+                        padding: '7px 8px',
+                        cursor: 'pointer',
+                        fontFamily: sans,
+                        textAlign: 'left',
+                        boxSizing: 'border-box',
+                      }}
+                    >
+                      <span style={shapeSwatchStyle(n.type, 8)} />
+                      <span
+                        style={{
+                          flex: '1 1 0%',
+                          minWidth: 0,
+                          overflow: 'hidden',
+                          whiteSpace: 'nowrap',
+                          textOverflow: 'ellipsis',
+                          fontSize: 12.5,
+                          color: TEXT_PRIMARY,
+                          lineHeight: 1.3,
+                        }}
+                      >
+                        {n.label}
+                      </span>
+                    </button>
+                  ))}
+                </div>
+              </div>
+            ))}
+          </div>
+        </div>
+
+        {/* CANVAS */}
+        <div
+          ref={wrapRef}
+          style={{
+            flex: 1,
+            position: 'relative',
+            overflow: 'hidden',
+            cursor: 'grab',
+            backgroundColor: '#200620',
+            backgroundImage: 'radial-gradient(rgba(255,255,255,0.09) 1px, transparent 1px)',
+            backgroundSize: '26px 26px',
+          }}
+        >
+          {snap.nodes.length === 0 ? (
+            <div
+              style={{
+                display: 'flex',
+                height: '100%',
+                alignItems: 'center',
+                justifyContent: 'center',
+                padding: '0 24px',
+                textAlign: 'center',
+                color: TEXT_FAINT,
+                fontSize: 14,
+              }}
+            >
+              No graph data yet &mdash; connect a Slack workspace and start a backfill
+              from{' '}
+              <a href="/workspaces" style={{ color: '#36C5F0', marginLeft: 4 }}>
+                /workspaces
+              </a>
+              .
+            </div>
+          ) : (
+            <ForceGraph2D
+              ref={fgRef}
+              width={dims.w || undefined}
+              height={dims.h || undefined}
+              graphData={graphData}
+              backgroundColor="rgba(0,0,0,0)"
+              nodeRelSize={6}
+              nodeVal={(n: any) => 1 + (n.__deg || 0)}
+              cooldownTicks={120}
+              d3VelocityDecay={0.3}
+              nodeVisibility={(n: any) => !hidden.has(n.type)}
+              linkVisibility={(l: any) =>
+                !hidden.has(l.fromType) && !hidden.has(l.toType)
+              }
+              linkColor={(l: any) =>
+                dimming.current
+                  ? hiLinks.current.has(l.id)
+                    ? 'rgba(243,234,244,0.55)'
+                    : 'rgba(216,198,219,0.04)'
+                  : 'rgba(216,198,219,0.16)'
+              }
+              linkWidth={(l: any) =>
+                hiLinks.current.has(l.id)
+                  ? Math.min(1 + (l.weight || 1) * 0.5, 5)
+                  : Math.min(0.4 + (l.weight || 1) * 0.3, 3)
+              }
+              // Particles only on the links you're hovering → clean by default.
+              linkDirectionalParticles={(l: any) =>
+                hiLinks.current.has(l.id) ? 3 : 0
+              }
+              linkDirectionalParticleWidth={2}
+              linkDirectionalParticleSpeed={0.006}
+              onNodeHover={handleHover}
+              onNodeClick={(n: any) => {
+                setSelected(n);
+                focusNode(n);
+              }}
+              onNodeDragEnd={(n: any) => {
+                // Pin where dropped so the layout stops shoving it around.
+                n.fx = n.x;
+                n.fy = n.y;
+              }}
+              onBackgroundClick={() => {
+                setSelected(null);
+                hoverId.current = null;
+                recomputeHighlight();
+              }}
+              onEngineStop={() => {
+                if (!didFit.current) {
+                  didFit.current = true;
+                  fgRef.current?.zoomToFit(500, 70);
+                }
+              }}
+              nodeCanvasObject={(
+                node: any,
+                ctx: CanvasRenderingContext2D,
+                scale: number,
+              ) => {
+                const baseR = 3.5 + Math.sqrt(node.__deg || 0) * 1.7; // size = involvement
+                const r = baseR * SHAPE_SHRINK[node.type as NodeType];
+                const lit = hiNodes.current.has(node.id);
+                const isSel = node.id === selected?.id;
+                const dim = dimming.current && !lit;
+                const base = COLORS[node.type as NodeType] || TEXT_MUTED;
+
+                ctx.beginPath();
+                traceNodeShape(ctx, node.type, node.x, node.y, r);
+                ctx.fillStyle = dim ? withAlpha(base, 0.15) : base;
+                ctx.fill();
+
+                if (lit || isSel) {
+                  ctx.lineWidth = 1.6 / scale;
+                  ctx.strokeStyle = 'rgba(255,255,255,0.9)';
+                  ctx.stroke();
+                }
+
+                // Label only when zoomed in, highlighted, or selected.
+                if (scale > LABEL_AT_SCALE || lit || isSel) {
+                  const fs = Math.max(11 / scale, 2.5);
+                  ctx.font = `${fs}px Inter, system-ui, sans-serif`;
+                  ctx.textAlign = 'center';
+                  ctx.fillStyle = dim ? 'rgba(243,234,244,0.25)' : TEXT_PRIMARY;
+                  ctx.fillText(node.label, node.x, node.y + baseR + fs + 1);
+                }
+              }}
+              nodePointerAreaPaint={(
+                node: any,
+                color: string,
+                ctx: CanvasRenderingContext2D,
+              ) => {
+                const r = 3.5 + Math.sqrt(node.__deg || 0) * 1.7;
+                ctx.fillStyle = color;
+                ctx.beginPath();
+                ctx.arc(node.x, node.y, r + 2, 0, 2 * Math.PI);
+                ctx.fill();
+              }}
+            />
+          )}
+        </div>
+
+        {/* DETAIL PANEL */}
+        <div
+          style={{
+            flex: 'none',
+            width: panelOpen ? 320 : 0,
+            opacity: panelOpen ? 1 : 0,
+            overflow: 'hidden',
+            boxSizing: 'border-box',
+            background: PANEL_BG,
+            borderLeft: `1px solid ${BORDER}`,
+            transition: 'width .35s cubic-bezier(.2,.8,.2,1), opacity .25s ease',
+          }}
+        >
+          {selected ? (
+            <div style={{ padding: '24px 22px', width: 320, boxSizing: 'border-box', overflowY: 'auto', height: '100%' }}>
+              <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', gap: 12, marginBottom: 18 }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                  <span style={shapeSwatchStyle(selected.type, 10)} />
+                  <span
+                    style={{
+                      fontSize: 11,
+                      fontFamily: mono,
+                      letterSpacing: '.06em',
+                      textTransform: 'uppercase',
+                      color: TEXT_SECONDARY,
+                    }}
+                  >
+                    {selected.type}
+                  </span>
+                </div>
+                <button
+                  onClick={() => setSelected(null)}
+                  aria-label="Close panel"
+                  style={{ background: 'none', border: 'none', color: TEXT_MUTED, cursor: 'pointer', lineHeight: 1, padding: 0, display: 'flex' }}
+                >
+                  <X size={18} />
+                </button>
+              </div>
+
+              <h2 style={{ margin: '0 0 14px', fontSize: 18, fontWeight: 600, lineHeight: 1.35, color: '#FFFFFF' }}>
+                {selected.label}
+              </h2>
+              <p style={{ margin: '0 0 22px', fontSize: 13.5, lineHeight: 1.6, color: TEXT_SECONDARY }}>
+                {detailMeta}
+              </p>
+
+              {detailConnections.length > 0 && (
+                <div style={{ marginBottom: 22 }}>
+                  <div
+                    style={{
+                      fontSize: 11,
+                      fontFamily: mono,
+                      letterSpacing: '.06em',
+                      textTransform: 'uppercase',
+                      color: TEXT_MUTED,
+                      marginBottom: 10,
+                    }}
+                  >
+                    Connected
+                  </div>
+                  <div style={{ display: 'flex', flexWrap: 'wrap', gap: 7 }}>
+                    {detailConnections.map((c) => (
+                      <button
+                        key={c.id}
+                        onClick={() => selectAndFocus(c.id)}
+                        style={{
+                          display: 'flex',
+                          alignItems: 'center',
+                          gap: 6,
+                          background: 'rgba(255,255,255,0.06)',
+                          border: `1px solid ${BORDER_STRONG}`,
+                          borderRadius: 999,
+                          padding: '6px 11px',
+                          cursor: 'pointer',
+                          fontFamily: sans,
+                        }}
+                      >
+                        <span style={shapeSwatchStyle(c.type, 8)} />
+                        <span style={{ fontSize: 12, color: TEXT_PRIMARY }}>{c.label}</span>
+                      </button>
+                    ))}
+                  </div>
+                </div>
+              )}
+
+              <div
+                style={{
+                  fontSize: 11,
+                  fontFamily: mono,
+                  letterSpacing: '.06em',
+                  textTransform: 'uppercase',
+                  color: TEXT_MUTED,
+                  marginBottom: 10,
+                }}
+              >
+                Slack evidence
+              </div>
+              {detailEvidence.length === 0 ? (
+                <p style={{ margin: 0, fontSize: 12.5, color: TEXT_FAINT, lineHeight: 1.5 }}>
+                  No sourced Slack messages yet for this node.
+                </p>
+              ) : (
+                <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+                  {detailEvidence.map((ev, i) => (
+                    <div
+                      key={i}
+                      style={{
+                        background: BG,
+                        border: `1px solid ${BORDER}`,
+                        borderRadius: 10,
+                        padding: '12px 13px',
+                      }}
+                    >
+                      <p style={{ margin: '0 0 9px', fontSize: 13, lineHeight: 1.55, color: TEXT_PRIMARY }}>
+                        {ev.text}
+                      </p>
+                      <div style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 11, fontFamily: mono, color: TEXT_MUTED }}>
+                        <span>{ev.channel}</span>
+                        <span>&middot;</span>
+                        <span>{ev.time}</span>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+          ) : (
+            <div
+              style={{
+                height: '100%',
+                minHeight: 400,
+                width: 320,
+                boxSizing: 'border-box',
+                display: 'flex',
+                flexDirection: 'column',
+                alignItems: 'center',
+                justifyContent: 'center',
+                textAlign: 'center',
+                padding: 40,
+                gap: 12,
+              }}
+            >
+              <div style={{ width: 44, height: 44, borderRadius: '50%', border: `1.5px dashed ${BORDER_STRONG}` }} />
+              <p style={{ margin: 0, fontSize: 13.5, color: TEXT_FAINT, lineHeight: 1.6, maxWidth: 200 }}>
+                Select a person, project, or decision to see who actually knows this.
+              </p>
+            </div>
+          )}
         </div>
       </div>
-
-      {/* Detail panel — right rail on desktop, bottom sheet on mobile */}
-      {selected && (
-        <div
-          className="pointer-events-auto absolute z-20 border border-zinc-800 bg-zinc-900/95 backdrop-blur
-            inset-x-0 bottom-0 max-h-[55vh] overflow-y-auto rounded-t-2xl p-4
-            sm:inset-x-auto sm:bottom-auto sm:right-0 sm:top-0 sm:m-4 sm:w-80 sm:max-h-[calc(100vh-2rem)] sm:rounded-xl"
-        >
-          <div className="flex items-center justify-between">
-            <span
-              className="rounded px-2 py-0.5 text-xs font-medium text-black"
-              style={{ background: COLORS[selected.type] }}
-            >
-              {selected.type}
-            </span>
-            <button
-              onClick={() => setSelected(null)}
-              className="text-zinc-500 hover:text-zinc-200"
-            >
-              ✕
-            </button>
-          </div>
-          <h2 className="mt-2 text-lg font-semibold">{selected.label}</h2>
-          <div className="mt-3 space-y-2 text-sm">
-            {snap.edges
-              .filter((e) => e.from === selected.id || e.to === selected.id)
-              .sort((a, b) => b.weight - a.weight)
-              .map((e) => {
-                const otherId = e.from === selected.id ? e.to : e.from;
-                const other = snap.nodes.find((n) => n.id === otherId);
-                return (
-                  <button
-                    key={e.id}
-                    onClick={() => {
-                      if (other) {
-                        setSelected(other);
-                        focusNode(nodeMap.current.get(other.id));
-                      }
-                    }}
-                    className="block w-full rounded-lg bg-zinc-800/60 p-2 text-left hover:bg-zinc-800"
-                  >
-                    <div className="text-xs text-zinc-400">
-                      {e.type} · weight {e.weight} ·{' '}
-                      {new Date(e.last_active).toLocaleDateString()}
-                    </div>
-                    <div className="font-medium">{other?.label || otherId}</div>
-                    {e.sources?.[0]?.excerpt && (
-                      <div className="mt-1 text-xs italic text-zinc-400">
-                        “{e.sources[0].excerpt}”
-                      </div>
-                    )}
-                  </button>
-                );
-              })}
-          </div>
-        </div>
-      )}
-
-      {snap.nodes.length === 0 ? (
-        <div className="flex h-full items-center justify-center px-6 text-center text-zinc-500">
-          No graph data yet — seed the demo or ingest some Slack messages.
-        </div>
-      ) : (
-        <ForceGraph2D
-          ref={fgRef}
-          width={dims.w || undefined}
-          height={dims.h || undefined}
-          graphData={graphData}
-          backgroundColor="#0b0b12"
-          nodeRelSize={6}
-          nodeVal={(n: any) => 1 + (n.__deg || 0)}
-          cooldownTicks={120}
-          d3VelocityDecay={0.3}
-          nodeVisibility={(n: any) => !hidden.has(n.type)}
-          linkVisibility={(l: any) =>
-            !hidden.has(l.fromType) && !hidden.has(l.toType)
-          }
-          linkColor={(l: any) =>
-            dimming.current
-              ? hiLinks.current.has(l.id)
-                ? 'rgba(255,255,255,0.55)'
-                : 'rgba(255,255,255,0.04)'
-              : 'rgba(255,255,255,0.13)'
-          }
-          linkWidth={(l: any) =>
-            hiLinks.current.has(l.id)
-              ? Math.min(1 + (l.weight || 1) * 0.5, 5)
-              : Math.min(0.4 + (l.weight || 1) * 0.3, 3)
-          }
-          // Particles only on the links you're hovering → clean by default.
-          linkDirectionalParticles={(l: any) =>
-            hiLinks.current.has(l.id) ? 3 : 0
-          }
-          linkDirectionalParticleWidth={2}
-          linkDirectionalParticleSpeed={0.006}
-          onNodeHover={handleHover}
-          onNodeClick={(n: any) => {
-            setSelected(n);
-            focusNode(n);
-          }}
-          onNodeDragEnd={(n: any) => {
-            // Pin where dropped so the layout stops shoving it around.
-            n.fx = n.x;
-            n.fy = n.y;
-          }}
-          onBackgroundClick={() => {
-            setSelected(null);
-            hoverId.current = null;
-            recomputeHighlight();
-          }}
-          onEngineStop={() => {
-            if (!didFit.current) {
-              didFit.current = true;
-              fgRef.current?.zoomToFit(500, 70);
-            }
-          }}
-          nodeCanvasObject={(
-            node: any,
-            ctx: CanvasRenderingContext2D,
-            scale: number,
-          ) => {
-            const r = 3.5 + Math.sqrt(node.__deg || 0) * 1.7; // size = involvement
-            const lit = hiNodes.current.has(node.id);
-            const isSel = node.id === selected?.id;
-            const dim = dimming.current && !lit;
-            const base = COLORS[node.type as NodeType] || '#888';
-
-            ctx.beginPath();
-            ctx.arc(node.x, node.y, r, 0, 2 * Math.PI);
-            ctx.fillStyle = dim ? withAlpha(base, 0.15) : base;
-            ctx.fill();
-
-            if (lit || isSel) {
-              ctx.lineWidth = 1.6 / scale;
-              ctx.strokeStyle = 'rgba(255,255,255,0.9)';
-              ctx.stroke();
-            }
-
-            // Label only when zoomed in, highlighted, or selected.
-            if (scale > LABEL_AT_SCALE || lit || isSel) {
-              const fs = Math.max(11 / scale, 2.5);
-              ctx.font = `${fs}px Inter, system-ui, sans-serif`;
-              ctx.textAlign = 'center';
-              ctx.fillStyle = dim ? 'rgba(228,228,231,0.25)' : '#e4e4e7';
-              ctx.fillText(node.label, node.x, node.y + r + fs + 1);
-            }
-          }}
-          nodePointerAreaPaint={(
-            node: any,
-            color: string,
-            ctx: CanvasRenderingContext2D,
-          ) => {
-            const r = 3.5 + Math.sqrt(node.__deg || 0) * 1.7;
-            ctx.fillStyle = color;
-            ctx.beginPath();
-            ctx.arc(node.x, node.y, r + 2, 0, 2 * Math.PI);
-            ctx.fill();
-          }}
-        />
-      )}
     </div>
   );
 }
