@@ -78,6 +78,23 @@ const SHAPE_SHRINK: Record<NodeType, number> = {
 };
 
 const LABEL_AT_SCALE = 1.5; // labels only draw once zoomed past this — kills the clutter
+const LABEL_MAX_CHARS = 26; // decision summaries are full sentences — clip them so they don't blanket the canvas
+
+function truncateLabel(label: string, max = LABEL_MAX_CHARS) {
+  return label.length > max ? `${label.slice(0, max - 1)}…` : label;
+}
+
+// Node visual radius scales with involvement (degree). baseR is the
+// unshrunk size used for label offset/hit-testing; r is the drawn shape size.
+function nodeRadius(n: { type: NodeType; __deg?: number }) {
+  const baseR = 3.5 + Math.sqrt(n.__deg || 0) * 1.7;
+  return { baseR, r: baseR * SHAPE_SHRINK[n.type] };
+}
+
+type Rect = { x0: number; y0: number; x1: number; y1: number };
+function rectsOverlap(a: Rect, b: Rect) {
+  return a.x0 < b.x1 && a.x1 > b.x0 && a.y0 < b.y1 && a.y1 > b.y0;
+}
 
 function withAlpha(hex: string, a: number) {
   const n = parseInt(hex.slice(1), 16);
@@ -356,7 +373,12 @@ export default function GraphView({ teamId }: { teamId: string }) {
       [...seenN].sort().join(',') + '|' + [...seenL].sort().join(',');
     if (sigNow !== memberSig.current) {
       memberSig.current = sigNow;
-      setGraphData({ nodes: [...nm.values()], links: [...lm.values()] });
+      // Draw higher-degree nodes first so their labels claim space and
+      // lower-degree neighbors yield instead of overlapping them.
+      const nodes = [...nm.values()].sort(
+        (a, b) => (b.__deg || 0) - (a.__deg || 0),
+      );
+      setGraphData({ nodes, links: [...lm.values()] });
     } else {
       fgRef.current?.refresh?.();
     }
@@ -367,6 +389,19 @@ export default function GraphView({ teamId }: { teamId: string }) {
     const t = setInterval(load, 5000);
     return () => clearInterval(t);
   }, [load]);
+
+  // Default d3-force repulsion is too weak once a hub has several satellite
+  // nodes — they pile up on top of each other. Push harder around bigger
+  // (higher-degree) nodes and give links more room so clusters spread out.
+  useEffect(() => {
+    if (graphData.nodes.length === 0) return;
+    const fg = fgRef.current;
+    const charge = fg?.d3Force('charge');
+    charge?.strength((n: any) => -140 - (n.__deg || 0) * 22);
+    const link = fg?.d3Force('link');
+    link?.distance((l: any) => 60 + Math.min(l.weight || 1, 5) * 10);
+    fg?.d3ReheatSimulation?.();
+  }, [graphData]);
 
   const counts: Record<string, number> = {};
   for (const n of snap.nodes) counts[n.type] = (counts[n.type] || 0) + 1;
@@ -519,6 +554,25 @@ export default function GraphView({ teamId }: { teamId: string }) {
         fontFamily: sans,
       }}
     >
+      <style jsx>{`
+        .se3k-scroll::-webkit-scrollbar {
+          width: 6px;
+        }
+        .se3k-scroll::-webkit-scrollbar-track {
+          background: transparent;
+        }
+        .se3k-scroll::-webkit-scrollbar-thumb {
+          background: rgba(255, 255, 255, 0.15);
+          border-radius: 999px;
+        }
+        .se3k-scroll::-webkit-scrollbar-thumb:hover {
+          background: rgba(255, 255, 255, 0.28);
+        }
+        .se3k-scroll {
+          scrollbar-width: thin;
+          scrollbar-color: rgba(255, 255, 255, 0.15) transparent;
+        }
+      `}</style>
       {/* HEADER */}
       <div
         style={{
@@ -571,7 +625,7 @@ export default function GraphView({ teamId }: { teamId: string }) {
                 letterSpacing: '-0.01em',
               }}
             >
-              SE3K &mdash; Org Knowledge Graph
+              SE3K
             </h1>
             <p style={{ margin: '5px 0 0', fontSize: 13, color: TEXT_SECONDARY }}>
               &ldquo;Who actually knows this?&rdquo; &mdash; ranked by demonstrated
@@ -697,7 +751,10 @@ export default function GraphView({ teamId }: { teamId: string }) {
 
           <div style={{ height: 1, width: '100%', background: BORDER }} />
 
-          <div style={{ display: 'flex', flexDirection: 'column', gap: 16, overflowY: 'auto' }}>
+          <div
+            className="se3k-scroll"
+            style={{ flex: 1, minHeight: 0, display: 'flex', flexDirection: 'column', gap: 16, overflowY: 'auto' }}
+          >
             {directory.length === 0 && (
               <p style={{ margin: 0, fontSize: 12.5, color: TEXT_FAINT }}>No nodes yet.</p>
             )}
@@ -802,7 +859,7 @@ export default function GraphView({ teamId }: { teamId: string }) {
               backgroundColor="rgba(0,0,0,0)"
               nodeRelSize={6}
               nodeVal={(n: any) => 1 + (n.__deg || 0)}
-              cooldownTicks={120}
+              cooldownTicks={300}
               d3VelocityDecay={0.3}
               nodeVisibility={(n: any) => !hidden.has(n.type)}
               linkVisibility={(l: any) =>
@@ -852,8 +909,7 @@ export default function GraphView({ teamId }: { teamId: string }) {
                 ctx: CanvasRenderingContext2D,
                 scale: number,
               ) => {
-                const baseR = 3.5 + Math.sqrt(node.__deg || 0) * 1.7; // size = involvement
-                const r = baseR * SHAPE_SHRINK[node.type as NodeType];
+                const { r } = nodeRadius(node);
                 const lit = hiNodes.current.has(node.id);
                 const isSel = node.id === selected?.id;
                 const dim = dimming.current && !lit;
@@ -869,14 +925,67 @@ export default function GraphView({ teamId }: { teamId: string }) {
                   ctx.strokeStyle = 'rgba(255,255,255,0.9)';
                   ctx.stroke();
                 }
+              }}
+              // Labels are drawn in one pass AFTER every node shape, so a
+              // label can be skipped when it would land on top of another
+              // node's shape — not just on top of another label.
+              onRenderFramePost={(ctx: CanvasRenderingContext2D, scale: number) => {
+                const showAll = scale > LABEL_AT_SCALE;
+                const priorityIds = new Set<string>();
+                if (hoverId.current) priorityIds.add(hoverId.current);
+                if (selected) priorityIds.add(selected.id);
 
-                // Label only when zoomed in, highlighted, or selected.
-                if (scale > LABEL_AT_SCALE || lit || isSel) {
+                const visible = [...nodeMap.current.values()].filter(
+                  (n) => !hidden.has(n.type) && n.x != null && n.y != null,
+                );
+                if (visible.length === 0) return;
+
+                const shapeRects = visible.map((n) => {
+                  const { r } = nodeRadius(n);
+                  return { id: n.id, x0: n.x! - r, x1: n.x! + r, y0: n.y! - r, y1: n.y! + r };
+                });
+
+                const candidates = visible
+                  .filter(
+                    (n) => showAll || hiNodes.current.has(n.id) || priorityIds.has(n.id),
+                  )
+                  .sort((a, b) => {
+                    const pa = priorityIds.has(a.id) || hiNodes.current.has(a.id) ? 1 : 0;
+                    const pb = priorityIds.has(b.id) || hiNodes.current.has(b.id) ? 1 : 0;
+                    if (pa !== pb) return pb - pa;
+                    return (b.__deg || 0) - (a.__deg || 0);
+                  });
+
+                const placed: Rect[] = [];
+                for (const n of candidates) {
+                  const lit = hiNodes.current.has(n.id);
+                  const isSel = n.id === selected?.id;
+                  const priority = lit || isSel;
+                  const dim = dimming.current && !lit;
+                  const { baseR } = nodeRadius(n);
+                  const text = priority ? n.label : truncateLabel(n.label);
                   const fs = Math.max(11 / scale, 2.5);
                   ctx.font = `${fs}px Inter, system-ui, sans-serif`;
-                  ctx.textAlign = 'center';
-                  ctx.fillStyle = dim ? 'rgba(243,234,244,0.25)' : TEXT_PRIMARY;
-                  ctx.fillText(node.label, node.x, node.y + baseR + fs + 1);
+                  const w = ctx.measureText(text).width;
+                  const labelY = n.y! + baseR + fs + 1;
+                  const pad = 2 / scale;
+                  const rect: Rect = {
+                    x0: n.x! - w / 2 - pad,
+                    x1: n.x! + w / 2 + pad,
+                    y0: labelY - fs,
+                    y1: labelY + pad,
+                  };
+
+                  const blocked =
+                    placed.some((o) => rectsOverlap(rect, o)) ||
+                    shapeRects.some((s) => s.id !== n.id && rectsOverlap(rect, s));
+
+                  if (priority || !blocked) {
+                    ctx.textAlign = 'center';
+                    ctx.fillStyle = dim ? 'rgba(243,234,244,0.25)' : TEXT_PRIMARY;
+                    ctx.fillText(text, n.x!, labelY);
+                    placed.push(rect);
+                  }
                 }
               }}
               nodePointerAreaPaint={(
@@ -884,10 +993,10 @@ export default function GraphView({ teamId }: { teamId: string }) {
                 color: string,
                 ctx: CanvasRenderingContext2D,
               ) => {
-                const r = 3.5 + Math.sqrt(node.__deg || 0) * 1.7;
+                const { baseR } = nodeRadius(node);
                 ctx.fillStyle = color;
                 ctx.beginPath();
-                ctx.arc(node.x, node.y, r + 2, 0, 2 * Math.PI);
+                ctx.arc(node.x, node.y, baseR + 2, 0, 2 * Math.PI);
                 ctx.fill();
               }}
             />
