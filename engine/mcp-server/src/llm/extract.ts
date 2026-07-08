@@ -127,12 +127,18 @@ async function extractChunk(
         `projects: ${[...known.projects].map(([k, n]) => `${k} (${n})`).join(', ') || '(none)'}\n` +
         `decisions: ${[...known.decisions.keys()].join(', ') || '(none)'}\n\n`
       : '';
-  const raw = await chat({
-    system: EXTRACTION_SYSTEM,
-    user: `${hint}Slack messages to extract from:\n\n${chunkText}`,
-    json: true,
-    temperature: 0.1,
-  });
+  let raw: string;
+  try {
+    raw = await chat({
+      system: EXTRACTION_SYSTEM,
+      user: `${hint}Slack messages to extract from:\n\n${chunkText}`,
+      json: true,
+      temperature: 0.1,
+    });
+  } catch (err) {
+    dbg('⚠️  extract · chat request failed:', err);
+    return EMPTY;
+  }
   try {
     const parsed = JSON.parse(stripFences(raw)) as Partial<ExtractionResult>;
     const merged = { ...EMPTY, ...parsed };
