@@ -4,7 +4,7 @@ import { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties }
 import dynamic from 'next/dynamic';
 import Image from 'next/image';
 import Link from 'next/link';
-import { ArrowLeft, Maximize2, Minimize2, X } from 'lucide-react';
+import { ArrowLeft, ExternalLink, Maximize2, Minimize2, X } from 'lucide-react';
 import { sans, mono } from './fonts';
 
 // react-force-graph uses canvas + window, so it must be client-only.
@@ -26,7 +26,7 @@ interface GEdge {
   to: string;
   weight: number;
   last_active: string;
-  sources: { channel?: string; ts?: string; excerpt?: string }[];
+  sources: { channel?: string; ts?: string; excerpt?: string; permalink?: string }[];
 }
 interface Snapshot {
   nodes: GNode[];
@@ -458,7 +458,7 @@ export default function GraphView({ teamId }: { teamId: string }) {
   const detailEvidence = useMemo(() => {
     if (!selected) return [];
     const inc = edgesByNode.get(selected.id) || [];
-    const items: { channel: string; time: string; text: string; ts: number }[] = [];
+    const items: { channel: string; time: string; text: string; ts: number; permalink?: string }[] = [];
     for (const e of inc) {
       for (const s of e.sources || []) {
         if (!s.excerpt) continue;
@@ -468,6 +468,7 @@ export default function GraphView({ teamId }: { teamId: string }) {
           time: relTime(s.ts),
           text: s.excerpt,
           ts: Number.isNaN(t) ? 0 : t,
+          permalink: s.permalink,
         });
       }
     }
@@ -1123,6 +1124,27 @@ export default function GraphView({ teamId }: { teamId: string }) {
                         <span>{ev.channel}</span>
                         <span>&middot;</span>
                         <span>{ev.time}</span>
+                        {ev.permalink && (
+                          <>
+                            <span style={{ flex: 1 }} />
+                            <a
+                              href={ev.permalink}
+                              target="_blank"
+                              rel="noopener noreferrer"
+                              title="Open in Slack"
+                              style={{
+                                display: 'flex',
+                                alignItems: 'center',
+                                gap: 4,
+                                color: '#36C5F0',
+                                textDecoration: 'none',
+                              }}
+                            >
+                              <span>View in Slack</span>
+                              <ExternalLink size={11} />
+                            </a>
+                          </>
+                        )}
                       </div>
                     </div>
                   ))}
