@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useState } from 'react';
 import Link from 'next/link';
-import AddToSlackButton from '../AddToSlackButton';
+import AddToSlackButton from '../../components/AddToSlackButton';
 import { inter, plexMono, sans, mono } from '../fonts';
 
 interface Installation {
@@ -40,7 +40,11 @@ const pillButton = (color: string, borderColor: string) => ({
   cursor: 'pointer',
 });
 
-export default function WorkspacesClient({ dashboardKey }: { dashboardKey: string | null }) {
+export default function WorkspacesClient({
+  dashboardKey,
+}: {
+  dashboardKey: string | null;
+}) {
   const [installs, setInstalls] = useState<Installation[]>([]);
   const [loading, setLoading] = useState(true);
   const [banner, setBanner] = useState<string | null>(null);
@@ -73,7 +77,9 @@ export default function WorkspacesClient({ dashboardKey }: { dashboardKey: strin
     }
     setExpanded(teamId);
     if (!channels[teamId]) {
-      const res = await fetch(`/api/workspaces/${teamId}/channels`, { cache: 'no-store' });
+      const res = await fetch(`/api/workspaces/${teamId}/channels`, {
+        cache: 'no-store',
+      });
       const data = await res.json();
       if (!res.ok || !Array.isArray(data)) {
         setBanner(
@@ -114,7 +120,9 @@ export default function WorkspacesClient({ dashboardKey }: { dashboardKey: strin
     const chosen = [...(selected[teamId] || [])];
     const joinAll = !!autoJoin[teamId];
     if (!joinAll && chosen.length === 0) {
-      alert('Pick at least one channel, or check "auto-join all public channels".');
+      alert(
+        'Pick at least one channel, or check "auto-join all public channels".',
+      );
       return;
     }
     const res = await fetch(`/api/workspaces/${teamId}/backfill`, {
@@ -133,7 +141,7 @@ export default function WorkspacesClient({ dashboardKey }: { dashboardKey: strin
     if (
       !confirm(
         `Uninstall SE3K from ${who}?\n\n` +
-          "This removes SE3K from your Slack workspace and permanently deletes its graph, " +
+          'This removes SE3K from your Slack workspace and permanently deletes its graph, ' +
           'backfill history, and dedupe records. You can re-add it anytime with "Add to Slack".',
       )
     )
@@ -150,12 +158,19 @@ export default function WorkspacesClient({ dashboardKey }: { dashboardKey: strin
   };
 
   const dashboardHref = (teamId: string) =>
-    dashboardKey ? `/g/${dashboardKey}?team=${encodeURIComponent(teamId)}` : null;
+    dashboardKey
+      ? `/g/${dashboardKey}?team=${encodeURIComponent(teamId)}`
+      : null;
 
   return (
     <div
       className={`${inter.variable} ${plexMono.variable}`}
-      style={{ background: '#26082A', minHeight: '100vh', fontFamily: sans, color: '#F3EAF4' }}
+      style={{
+        background: '#26082A',
+        minHeight: '100vh',
+        fontFamily: sans,
+        color: '#F3EAF4',
+      }}
     >
       {/* NAV */}
       <nav
@@ -170,7 +185,12 @@ export default function WorkspacesClient({ dashboardKey }: { dashboardKey: strin
       >
         <Link
           href="/"
-          style={{ display: 'flex', alignItems: 'center', gap: '12px', textDecoration: 'none' }}
+          style={{
+            display: 'flex',
+            alignItems: 'center',
+            gap: '12px',
+            textDecoration: 'none',
+          }}
         >
           {/* eslint-disable-next-line @next/next/no-img-element */}
           <img
@@ -195,7 +215,12 @@ export default function WorkspacesClient({ dashboardKey }: { dashboardKey: strin
         <div style={{ display: 'flex', alignItems: 'center', gap: '24px' }}>
           <Link
             href="/"
-            style={{ textDecoration: 'none', color: '#D8C6DB', fontSize: '14px', fontWeight: 500 }}
+            style={{
+              textDecoration: 'none',
+              color: '#D8C6DB',
+              fontSize: '14px',
+              fontWeight: 500,
+            }}
           >
             &larr; Home
           </Link>
@@ -204,7 +229,9 @@ export default function WorkspacesClient({ dashboardKey }: { dashboardKey: strin
       </nav>
 
       {/* HEADER */}
-      <div style={{ maxWidth: '900px', margin: '0 auto', padding: '48px 32px 0' }}>
+      <div
+        style={{ maxWidth: '900px', margin: '0 auto', padding: '48px 32px 0' }}
+      >
         <div
           style={{
             display: 'inline-flex',
@@ -220,7 +247,14 @@ export default function WorkspacesClient({ dashboardKey }: { dashboardKey: strin
             marginBottom: '20px',
           }}
         >
-          <span style={{ width: '6px', height: '6px', borderRadius: '50%', background: '#ECB22E' }} />
+          <span
+            style={{
+              width: '6px',
+              height: '6px',
+              borderRadius: '50%',
+              background: '#ECB22E',
+            }}
+          />
           CONNECTED WORKSPACES
         </div>
         <h1
@@ -234,9 +268,17 @@ export default function WorkspacesClient({ dashboardKey }: { dashboardKey: strin
         >
           Your workspaces
         </h1>
-        <p style={{ color: '#D8C6DB', fontSize: '15.5px', lineHeight: 1.6, maxWidth: '560px', margin: '0 0 28px' }}>
-          Connect a Slack workspace, then backfill its history so the knowledge graph
-          isn&apos;t starting from a blank slate.
+        <p
+          style={{
+            color: '#D8C6DB',
+            fontSize: '15.5px',
+            lineHeight: 1.6,
+            maxWidth: '560px',
+            margin: '0 0 28px',
+          }}
+        >
+          Connect a Slack workspace, then backfill its history so the knowledge
+          graph isn&apos;t starting from a blank slate.
         </p>
 
         {banner && (
@@ -255,11 +297,23 @@ export default function WorkspacesClient({ dashboardKey }: { dashboardKey: strin
           </div>
         )}
 
-        <div style={{ display: 'flex', flexDirection: 'column', gap: '14px', paddingBottom: '100px' }}>
-          {loading && <p style={{ color: '#7A6A7D', fontSize: '14px' }}>Loading&hellip;</p>}
+        <div
+          style={{
+            display: 'flex',
+            flexDirection: 'column',
+            gap: '14px',
+            paddingBottom: '100px',
+          }}
+        >
+          {loading && (
+            <p style={{ color: '#7A6A7D', fontSize: '14px' }}>
+              Loading&hellip;
+            </p>
+          )}
           {!loading && installs.length === 0 && (
             <p style={{ color: '#7A6A7D', fontSize: '14px' }}>
-              No workspaces connected yet &mdash; click &ldquo;Add to Slack&rdquo; above.
+              No workspaces connected yet &mdash; click &ldquo;Add to
+              Slack&rdquo; above.
             </p>
           )}
           {installs.map((install) => {
@@ -275,19 +329,49 @@ export default function WorkspacesClient({ dashboardKey }: { dashboardKey: strin
                   padding: '20px 24px',
                 }}
               >
-                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '16px' }}>
+                <div
+                  style={{
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'space-between',
+                    gap: '16px',
+                  }}
+                >
                   <div>
-                    <div style={{ fontWeight: 700, fontSize: '16px', color: '#FFFFFF' }}>
+                    <div
+                      style={{
+                        fontWeight: 700,
+                        fontSize: '16px',
+                        color: '#FFFFFF',
+                      }}
+                    >
                       {install.teamName || install.teamId}
                     </div>
-                    <div style={{ fontFamily: mono, fontSize: '11.5px', color: '#7A6A7D', marginTop: '4px' }}>
+                    <div
+                      style={{
+                        fontFamily: mono,
+                        fontSize: '11.5px',
+                        color: '#7A6A7D',
+                        marginTop: '4px',
+                      }}
+                    >
                       {install.teamId} &middot; installed{' '}
                       {new Date(install.installedAt).toLocaleDateString()}
                     </div>
                   </div>
-                  <div style={{ display: 'flex', alignItems: 'center', gap: '8px', flexShrink: 0 }}>
+                  <div
+                    style={{
+                      display: 'flex',
+                      alignItems: 'center',
+                      gap: '8px',
+                      flexShrink: 0,
+                    }}
+                  >
                     {href && (
-                      <a href={href} style={pillButton('#D8C6DB', 'rgba(255,255,255,0.15)')}>
+                      <a
+                        href={href}
+                        style={pillButton('#D8C6DB', 'rgba(255,255,255,0.15)')}
+                      >
                         View graph
                       </a>
                     )}
@@ -298,7 +382,9 @@ export default function WorkspacesClient({ dashboardKey }: { dashboardKey: strin
                       {expanded === install.teamId ? 'Close' : 'Backfill'}
                     </button>
                     <button
-                      onClick={() => uninstall(install.teamId, install.teamName)}
+                      onClick={() =>
+                        uninstall(install.teamId, install.teamName)
+                      }
                       style={pillButton('#E01E5A', 'rgba(224,30,90,0.4)')}
                     >
                       Uninstall
@@ -307,19 +393,43 @@ export default function WorkspacesClient({ dashboardKey }: { dashboardKey: strin
                 </div>
 
                 {expanded === install.teamId && (
-                  <div style={{ marginTop: '20px', borderTop: '1px solid rgba(255,255,255,0.08)', paddingTop: '20px' }}>
-                    <label style={{ display: 'flex', alignItems: 'center', gap: '8px', fontSize: '14px', color: '#D8C6DB' }}>
+                  <div
+                    style={{
+                      marginTop: '20px',
+                      borderTop: '1px solid rgba(255,255,255,0.08)',
+                      paddingTop: '20px',
+                    }}
+                  >
+                    <label
+                      style={{
+                        display: 'flex',
+                        alignItems: 'center',
+                        gap: '8px',
+                        fontSize: '14px',
+                        color: '#D8C6DB',
+                      }}
+                    >
                       <input
                         type="checkbox"
                         checked={!!autoJoin[install.teamId]}
                         onChange={(e) =>
-                          setAutoJoin((a) => ({ ...a, [install.teamId]: e.target.checked }))
+                          setAutoJoin((a) => ({
+                            ...a,
+                            [install.teamId]: e.target.checked,
+                          }))
                         }
                       />
                       Auto-join &amp; backfill every public channel
                     </label>
-                    <p style={{ marginTop: '6px', fontSize: '12.5px', color: '#7A6A7D' }}>
-                      Private channels always need a manual /invite first &mdash; pick them below.
+                    <p
+                      style={{
+                        marginTop: '6px',
+                        fontSize: '12.5px',
+                        color: '#7A6A7D',
+                      }}
+                    >
+                      Private channels always need a manual /invite first
+                      &mdash; pick them below.
                     </p>
 
                     {!autoJoin[install.teamId] && (
@@ -351,23 +461,41 @@ export default function WorkspacesClient({ dashboardKey }: { dashboardKey: strin
                           >
                             <input
                               type="checkbox"
-                              checked={selected[install.teamId]?.has(c.id) || false}
-                              onChange={() => toggleChannel(install.teamId, c.id)}
+                              checked={
+                                selected[install.teamId]?.has(c.id) || false
+                              }
+                              onChange={() =>
+                                toggleChannel(install.teamId, c.id)
+                              }
                               disabled={!c.isMember && c.isPrivate}
                             />
                             <span>
                               {c.isPrivate ? '🔒' : '#'} {c.name}
                             </span>
                             {!c.isMember && !c.isPrivate && (
-                              <span style={{ fontSize: '11.5px', color: '#7A6A7D' }}>(will auto-join)</span>
+                              <span
+                                style={{ fontSize: '11.5px', color: '#7A6A7D' }}
+                              >
+                                (will auto-join)
+                              </span>
                             )}
                             {!c.isMember && c.isPrivate && (
-                              <span style={{ fontSize: '11.5px', color: '#7A6A7D' }}>(invite the bot first)</span>
+                              <span
+                                style={{ fontSize: '11.5px', color: '#7A6A7D' }}
+                              >
+                                (invite the bot first)
+                              </span>
                             )}
                           </label>
                         ))}
                         {channels[install.teamId]?.length === 0 && (
-                          <p style={{ padding: '6px 8px', fontSize: '12.5px', color: '#7A6A7D' }}>
+                          <p
+                            style={{
+                              padding: '6px 8px',
+                              fontSize: '12.5px',
+                              color: '#7A6A7D',
+                            }}
+                          >
                             No channels found.
                           </p>
                         )}
@@ -376,7 +504,9 @@ export default function WorkspacesClient({ dashboardKey }: { dashboardKey: strin
 
                     <button
                       onClick={() => startBackfill(install.teamId)}
-                      disabled={job?.status === 'pending' || job?.status === 'running'}
+                      disabled={
+                        job?.status === 'pending' || job?.status === 'running'
+                      }
                       style={{
                         marginTop: '14px',
                         background: '#2EB67D',
@@ -388,22 +518,38 @@ export default function WorkspacesClient({ dashboardKey }: { dashboardKey: strin
                         border: 'none',
                         cursor: 'pointer',
                         opacity:
-                          job?.status === 'pending' || job?.status === 'running' ? 0.5 : 1,
+                          job?.status === 'pending' || job?.status === 'running'
+                            ? 0.5
+                            : 1,
                       }}
                     >
                       Start backfill
                     </button>
 
                     {job && (
-                      <div style={{ marginTop: '12px', fontFamily: mono, fontSize: '12px', color: '#7A6A7D' }}>
+                      <div
+                        style={{
+                          marginTop: '12px',
+                          fontFamily: mono,
+                          fontSize: '12px',
+                          color: '#7A6A7D',
+                        }}
+                      >
                         {job.status === 'failed' ? (
-                          <span style={{ color: '#E01E5A' }}>Failed: {job.error}</span>
+                          <span style={{ color: '#E01E5A' }}>
+                            Failed: {job.error}
+                          </span>
                         ) : (
                           <>
-                            {job.status} &middot; {job.channelsDone}/{job.channelsTotal} channel(s) &middot;{' '}
+                            {job.status} &middot; {job.channelsDone}/
+                            {job.channelsTotal} channel(s) &middot;{' '}
                             {job.messagesProcessed} message(s) ingested
                             {job.error && (
-                              <span style={{ display: 'block', color: '#ECB22E' }}>&#9888; {job.error}</span>
+                              <span
+                                style={{ display: 'block', color: '#ECB22E' }}
+                              >
+                                &#9888; {job.error}
+                              </span>
                             )}
                           </>
                         )}

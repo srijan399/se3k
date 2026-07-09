@@ -1,14 +1,14 @@
 import type { Metadata } from 'next';
 import Image from 'next/image';
 import Link from 'next/link';
-import AddToSlackButton from './AddToSlackButton';
-import SmoothAnchor from './SmoothAnchor';
+import AddToSlackButton from '../components/AddToSlackButton';
+import SmoothAnchor from '../components/SmoothAnchor';
 import { inter, plexMono, sans, mono } from './fonts';
 
 export const metadata: Metadata = {
-  title: 'SE3K — Who actually knows this?',
+  title: 'SE3K - Who actually knows this?',
   description:
-    "SE3K surfaces who really knows about X — ranked by demonstrated work, not who's assigned — and why past decisions were made, with receipts.",
+    "SE3K surfaces who really knows about X - ranked by demonstrated work, not who's assigned - and why past decisions were made, with receipts.",
 };
 
 const GITHUB_HREF = 'https://github.com/srijan399/se3k';
@@ -17,7 +17,7 @@ const PROBLEMS = [
   {
     color: '#E01E5A',
     title: 'Assigned ≠ expert',
-    text: "Jira says Dana owns it. Dana moved on months ago.",
+    text: 'Jira says Dana owns it. Dana moved on months ago.',
   },
   {
     color: '#ECB22E',
@@ -525,7 +525,11 @@ export default function Home() {
       {/* HOW IT WORKS */}
       <section
         id="how"
-        style={{ maxWidth: '1280px', margin: '0 auto', padding: '100px 56px 60px' }}
+        style={{
+          maxWidth: '1280px',
+          margin: '0 auto',
+          padding: '100px 56px 60px',
+        }}
       >
         <div style={{ textAlign: 'center', marginBottom: '64px' }}>
           <div
@@ -560,8 +564,8 @@ export default function Home() {
             }}
           >
             The MCP server is the brain &mdash; everything else is I/O. It
-            resolves facts from the graph in code first, and only asks the
-            model to phrase them.
+            resolves facts from the graph in code first, and only asks the model
+            to phrase them.
           </p>
         </div>
 
@@ -599,8 +603,12 @@ export default function Home() {
                 alignItems: 'center',
                 gap: '14px',
                 padding: '0 20px',
-                borderLeft: d.border ? '1px dashed rgba(255,255,255,0.12)' : undefined,
-                borderRight: d.border ? '1px dashed rgba(255,255,255,0.12)' : undefined,
+                borderLeft: d.border
+                  ? '1px dashed rgba(255,255,255,0.12)'
+                  : undefined,
+                borderRight: d.border
+                  ? '1px dashed rgba(255,255,255,0.12)'
+                  : undefined,
               }}
             >
               <div
@@ -617,15 +625,25 @@ export default function Home() {
                   fontSize: d.size === 72 ? '24px' : '22px',
                   color: d.fg,
                   animation: `floatnode 4s ease-in-out infinite ${d.delay}`,
-                  boxShadow: d.glow ? '0 0 0 6px rgba(236,178,46,0.12)' : undefined,
+                  boxShadow: d.glow
+                    ? '0 0 0 6px rgba(236,178,46,0.12)'
+                    : undefined,
                 }}
               >
                 {d.label}
               </div>
-              <div style={{ fontWeight: 700, fontSize: '15px', color: '#FFFFFF' }}>
+              <div
+                style={{ fontWeight: 700, fontSize: '15px', color: '#FFFFFF' }}
+              >
                 {d.title}
               </div>
-              <div style={{ fontFamily: mono, fontSize: '11.5px', color: '#7A6A7D' }}>
+              <div
+                style={{
+                  fontFamily: mono,
+                  fontSize: '11.5px',
+                  color: '#7A6A7D',
+                }}
+              >
                 {d.sub}
               </div>
               <p
@@ -681,7 +699,14 @@ export default function Home() {
               >
                 {f.title}
               </div>
-              <p style={{ color: '#B8A5BB', fontSize: '13.5px', lineHeight: 1.6, margin: 0 }}>
+              <p
+                style={{
+                  color: '#B8A5BB',
+                  fontSize: '13.5px',
+                  lineHeight: 1.6,
+                  margin: 0,
+                }}
+              >
                 {f.text}
               </p>
             </div>
@@ -690,7 +715,10 @@ export default function Home() {
       </section>
 
       {/* CTA FOOTER */}
-      <section id="cta" style={{ maxWidth: '1280px', margin: '80px auto 0', padding: '0 56px' }}>
+      <section
+        id="cta"
+        style={{ maxWidth: '1280px', margin: '80px auto 0', padding: '0 56px' }}
+      >
         <div
           style={{
             background: '#2B0A32',
@@ -713,7 +741,8 @@ export default function Home() {
               width: '280px',
               height: '280px',
               borderRadius: '50%',
-              background: 'radial-gradient(circle, rgba(46,182,125,0.25), transparent 70%)',
+              background:
+                'radial-gradient(circle, rgba(46,182,125,0.25), transparent 70%)',
               pointerEvents: 'none',
             }}
           />
@@ -758,11 +787,20 @@ export default function Home() {
             height={32}
             style={{ width: '32px', height: '32px', borderRadius: '7px' }}
           />
-          <span style={{ fontFamily: mono, fontSize: '13px', color: '#9C889F' }}>
+          <span
+            style={{ fontFamily: mono, fontSize: '13px', color: '#9C889F' }}
+          >
             SE3K &middot; who actually knows this?
           </span>
         </div>
-        <a href={GITHUB_HREF} style={{ textDecoration: 'none', color: '#9C889F', fontSize: '13.5px' }}>
+        <a
+          href={GITHUB_HREF}
+          style={{
+            textDecoration: 'none',
+            color: '#9C889F',
+            fontSize: '13.5px',
+          }}
+        >
           View source on GitHub
         </a>
       </footer>

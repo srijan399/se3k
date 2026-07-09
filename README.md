@@ -83,7 +83,7 @@ is I/O — now a persistent, multi-workspace service instead of a single-tenant
 sidecar:
 
 <p align="center">
-  <img src="web/public/Architecture_Se3k.png" alt="SE3K architecture" width="820" height="250"/>
+  <img src="web/public/archdiagram.png" alt="SE3K architecture" width="9000" height="600"/>
 </p>
 
 - **The bot** (Bolt, Socket Mode) is a genuine **MCP client**: it talks to the brain
@@ -108,9 +108,9 @@ sidecar:
   backfill (or auto-join every public one), and a live progress view — on top of
   the same force-directed graph, colored by type and sized by involvement.
 
-_For the challenge:_ **MCP** is the whole ingestion and query brain, now served
-over Streamable HTTP so both the bot and the dashboard are its clients; **Slack
-AI** is the in-Slack agent; and history backfill covers both zero-effort on-join
+**MCP** is the whole ingestion and query brain, now served
+over Streamable HTTP so both the bot and the dashboard are its clients;
+**Slack AI** is the in-Slack agent; and history backfill covers both zero-effort on-join
 catch-up (`conversations.history`) and an explicit, paginated full-history job
 triggered from the dashboard for workspaces installing after years of activity.
 

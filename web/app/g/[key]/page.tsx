@@ -1,4 +1,4 @@
-import GraphView from '../../GraphView';
+import GraphView from '../../../components/GraphView';
 
 export const dynamic = 'force-dynamic';
 
@@ -30,9 +30,12 @@ export default async function GatedDashboard({
     return (
       <div className="flex h-screen w-screen items-center justify-center bg-[#26082A] text-[#D8C6DB]">
         <div className="text-center">
-          <p className="text-lg font-semibold text-white">No workspace selected</p>
+          <p className="text-lg font-semibold text-white">
+            No workspace selected
+          </p>
           <p className="mt-1 text-sm">
-            Append <code>?team=&lt;teamId&gt;</code> to this link, or pick one from{' '}
+            Append <code>?team=&lt;teamId&gt;</code> to this link, or pick one
+            from{' '}
             <a className="underline text-[#36C5F0]" href="/workspaces">
               /workspaces
             </a>

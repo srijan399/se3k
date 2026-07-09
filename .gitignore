@@ -11,3 +11,6 @@ dist/
 
 /pnpm-lock.yaml
 testing.txt
+
+# Devpost writeup — kept local, not part of the shipped repo.
+/description.md

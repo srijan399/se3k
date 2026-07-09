@@ -1,11 +1,18 @@
 'use client';
 
-import { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties } from 'react';
+import {
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+  type CSSProperties,
+} from 'react';
 import dynamic from 'next/dynamic';
 import Image from 'next/image';
 import Link from 'next/link';
 import { ArrowLeft, ExternalLink, Maximize2, Minimize2, X } from 'lucide-react';
-import { sans, mono } from './fonts';
+import { sans, mono } from '../app/fonts';
 
 // react-force-graph uses canvas + window, so it must be client-only.
 const ForceGraph2D = dynamic(() => import('react-force-graph-2d'), {
@@ -26,7 +33,12 @@ interface GEdge {
   to: string;
   weight: number;
   last_active: string;
-  sources: { channel?: string; ts?: string; excerpt?: string; permalink?: string }[];
+  sources: {
+    channel?: string;
+    ts?: string;
+    excerpt?: string;
+    permalink?: string;
+  }[];
 }
 interface Snapshot {
   nodes: GNode[];
@@ -106,7 +118,11 @@ function withAlpha(hex: string, a: number) {
 // same shape language as the graph itself.
 function shapeSwatchStyle(type: NodeType, size = 10): CSSProperties {
   const color = COLORS[type];
-  const base: CSSProperties = { display: 'inline-block', flexShrink: 0, background: color };
+  const base: CSSProperties = {
+    display: 'inline-block',
+    flexShrink: 0,
+    background: color,
+  };
   switch (type) {
     case 'Person':
       return { ...base, width: size, height: size, borderRadius: '50%' };
@@ -125,7 +141,8 @@ function shapeSwatchStyle(type: NodeType, size = 10): CSSProperties {
         ...base,
         width: size * 1.15,
         height: size * 1.15,
-        clipPath: 'polygon(25% 0%, 75% 0%, 100% 50%, 75% 100%, 25% 100%, 0% 50%)',
+        clipPath:
+          'polygon(25% 0%, 75% 0%, 100% 50%, 75% 100%, 25% 100%, 0% 50%)',
       };
   }
 }
@@ -458,7 +475,13 @@ export default function GraphView({ teamId }: { teamId: string }) {
   const detailEvidence = useMemo(() => {
     if (!selected) return [];
     const inc = edgesByNode.get(selected.id) || [];
-    const items: { channel: string; time: string; text: string; ts: number; permalink?: string }[] = [];
+    const items: {
+      channel: string;
+      time: string;
+      text: string;
+      ts: number;
+      permalink?: string;
+    }[] = [];
     for (const e of inc) {
       for (const s of e.sources || []) {
         if (!s.excerpt) continue;
@@ -480,7 +503,9 @@ export default function GraphView({ teamId }: { teamId: string }) {
     () =>
       TYPES.map((t) => ({
         type: t,
-        items: snap.nodes.filter((n) => n.type === t).sort((a, b) => a.label.localeCompare(b.label)),
+        items: snap.nodes
+          .filter((n) => n.type === t)
+          .sort((a, b) => a.label.localeCompare(b.label)),
       })).filter((g) => g.items.length > 0),
     [snap.nodes],
   );
@@ -628,9 +653,11 @@ export default function GraphView({ teamId }: { teamId: string }) {
             >
               SE3K
             </h1>
-            <p style={{ margin: '5px 0 0', fontSize: 13, color: TEXT_SECONDARY }}>
-              &ldquo;Who actually knows this?&rdquo; &mdash; ranked by demonstrated
-              involvement, not assignment.
+            <p
+              style={{ margin: '5px 0 0', fontSize: 13, color: TEXT_SECONDARY }}
+            >
+              &ldquo;Who actually knows this?&rdquo; &mdash; ranked by
+              demonstrated involvement, not assignment.
             </p>
           </div>
         </div>
@@ -722,10 +749,26 @@ export default function GraphView({ teamId }: { teamId: string }) {
                   }}
                 >
                   <span style={shapeSwatchStyle(t, 10)} />
-                  <span style={{ fontSize: 12.5, fontWeight: 500, color: TEXT_PRIMARY, flex: 1, textAlign: 'left' }}>
+                  <span
+                    style={{
+                      fontSize: 12.5,
+                      fontWeight: 500,
+                      color: TEXT_PRIMARY,
+                      flex: 1,
+                      textAlign: 'left',
+                    }}
+                  >
                     {t}
                   </span>
-                  <span style={{ fontSize: 11, fontFamily: mono, color: TEXT_MUTED }}>{count}</span>
+                  <span
+                    style={{
+                      fontSize: 11,
+                      fontFamily: mono,
+                      color: TEXT_MUTED,
+                    }}
+                  >
+                    {count}
+                  </span>
                 </button>
               );
             })}
@@ -754,10 +797,19 @@ export default function GraphView({ teamId }: { teamId: string }) {
 
           <div
             className="se3k-scroll"
-            style={{ flex: 1, minHeight: 0, display: 'flex', flexDirection: 'column', gap: 16, overflowY: 'auto' }}
+            style={{
+              flex: 1,
+              minHeight: 0,
+              display: 'flex',
+              flexDirection: 'column',
+              gap: 16,
+              overflowY: 'auto',
+            }}
           >
             {directory.length === 0 && (
-              <p style={{ margin: 0, fontSize: 12.5, color: TEXT_FAINT }}>No nodes yet.</p>
+              <p style={{ margin: 0, fontSize: 12.5, color: TEXT_FAINT }}>
+                No nodes yet.
+              </p>
             )}
             {directory.map((grp) => (
               <div key={grp.type}>
@@ -773,7 +825,9 @@ export default function GraphView({ teamId }: { teamId: string }) {
                 >
                   {grp.type}
                 </div>
-                <div style={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
+                <div
+                  style={{ display: 'flex', flexDirection: 'column', gap: 2 }}
+                >
                   {grp.items.map((n) => (
                     <button
                       key={n.id}
@@ -785,7 +839,10 @@ export default function GraphView({ teamId }: { teamId: string }) {
                         gap: 8,
                         width: '100%',
                         minWidth: 0,
-                        background: selected?.id === n.id ? 'rgba(255,255,255,0.1)' : 'transparent',
+                        background:
+                          selected?.id === n.id
+                            ? 'rgba(255,255,255,0.1)'
+                            : 'transparent',
                         border: 'none',
                         borderRadius: 7,
                         padding: '7px 8px',
@@ -827,7 +884,8 @@ export default function GraphView({ teamId }: { teamId: string }) {
             overflow: 'hidden',
             cursor: 'grab',
             backgroundColor: '#200620',
-            backgroundImage: 'radial-gradient(rgba(255,255,255,0.09) 1px, transparent 1px)',
+            backgroundImage:
+              'radial-gradient(rgba(255,255,255,0.09) 1px, transparent 1px)',
             backgroundSize: '26px 26px',
           }}
         >
@@ -844,8 +902,8 @@ export default function GraphView({ teamId }: { teamId: string }) {
                 fontSize: 14,
               }}
             >
-              No graph data yet &mdash; connect a Slack workspace and start a backfill
-              from{' '}
+              No graph data yet &mdash; connect a Slack workspace and start a
+              backfill from{' '}
               <a href="/workspaces" style={{ color: '#36C5F0', marginLeft: 4 }}>
                 /workspaces
               </a>
@@ -930,7 +988,10 @@ export default function GraphView({ teamId }: { teamId: string }) {
               // Labels are drawn in one pass AFTER every node shape, so a
               // label can be skipped when it would land on top of another
               // node's shape — not just on top of another label.
-              onRenderFramePost={(ctx: CanvasRenderingContext2D, scale: number) => {
+              onRenderFramePost={(
+                ctx: CanvasRenderingContext2D,
+                scale: number,
+              ) => {
                 const showAll = scale > LABEL_AT_SCALE;
                 const priorityIds = new Set<string>();
                 if (hoverId.current) priorityIds.add(hoverId.current);
@@ -943,16 +1004,31 @@ export default function GraphView({ teamId }: { teamId: string }) {
 
                 const shapeRects = visible.map((n) => {
                   const { r } = nodeRadius(n);
-                  return { id: n.id, x0: n.x! - r, x1: n.x! + r, y0: n.y! - r, y1: n.y! + r };
+                  return {
+                    id: n.id,
+                    x0: n.x! - r,
+                    x1: n.x! + r,
+                    y0: n.y! - r,
+                    y1: n.y! + r,
+                  };
                 });
 
                 const candidates = visible
                   .filter(
-                    (n) => showAll || hiNodes.current.has(n.id) || priorityIds.has(n.id),
+                    (n) =>
+                      showAll ||
+                      hiNodes.current.has(n.id) ||
+                      priorityIds.has(n.id),
                   )
                   .sort((a, b) => {
-                    const pa = priorityIds.has(a.id) || hiNodes.current.has(a.id) ? 1 : 0;
-                    const pb = priorityIds.has(b.id) || hiNodes.current.has(b.id) ? 1 : 0;
+                    const pa =
+                      priorityIds.has(a.id) || hiNodes.current.has(a.id)
+                        ? 1
+                        : 0;
+                    const pb =
+                      priorityIds.has(b.id) || hiNodes.current.has(b.id)
+                        ? 1
+                        : 0;
                     if (pa !== pb) return pb - pa;
                     return (b.__deg || 0) - (a.__deg || 0);
                   });
@@ -979,11 +1055,15 @@ export default function GraphView({ teamId }: { teamId: string }) {
 
                   const blocked =
                     placed.some((o) => rectsOverlap(rect, o)) ||
-                    shapeRects.some((s) => s.id !== n.id && rectsOverlap(rect, s));
+                    shapeRects.some(
+                      (s) => s.id !== n.id && rectsOverlap(rect, s),
+                    );
 
                   if (priority || !blocked) {
                     ctx.textAlign = 'center';
-                    ctx.fillStyle = dim ? 'rgba(243,234,244,0.25)' : TEXT_PRIMARY;
+                    ctx.fillStyle = dim
+                      ? 'rgba(243,234,244,0.25)'
+                      : TEXT_PRIMARY;
                     ctx.fillText(text, n.x!, labelY);
                     placed.push(rect);
                   }
@@ -1014,12 +1094,29 @@ export default function GraphView({ teamId }: { teamId: string }) {
             boxSizing: 'border-box',
             background: PANEL_BG,
             borderLeft: `1px solid ${BORDER}`,
-            transition: 'width .35s cubic-bezier(.2,.8,.2,1), opacity .25s ease',
+            transition:
+              'width .35s cubic-bezier(.2,.8,.2,1), opacity .25s ease',
           }}
         >
           {selected ? (
-            <div style={{ padding: '24px 22px', width: 320, boxSizing: 'border-box', overflowY: 'auto', height: '100%' }}>
-              <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', gap: 12, marginBottom: 18 }}>
+            <div
+              style={{
+                padding: '24px 22px',
+                width: 320,
+                boxSizing: 'border-box',
+                overflowY: 'auto',
+                height: '100%',
+              }}
+            >
+              <div
+                style={{
+                  display: 'flex',
+                  alignItems: 'flex-start',
+                  justifyContent: 'space-between',
+                  gap: 12,
+                  marginBottom: 18,
+                }}
+              >
                 <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
                   <span style={shapeSwatchStyle(selected.type, 10)} />
                   <span
@@ -1037,16 +1134,39 @@ export default function GraphView({ teamId }: { teamId: string }) {
                 <button
                   onClick={() => setSelected(null)}
                   aria-label="Close panel"
-                  style={{ background: 'none', border: 'none', color: TEXT_MUTED, cursor: 'pointer', lineHeight: 1, padding: 0, display: 'flex' }}
+                  style={{
+                    background: 'none',
+                    border: 'none',
+                    color: TEXT_MUTED,
+                    cursor: 'pointer',
+                    lineHeight: 1,
+                    padding: 0,
+                    display: 'flex',
+                  }}
                 >
                   <X size={18} />
                 </button>
               </div>
 
-              <h2 style={{ margin: '0 0 14px', fontSize: 18, fontWeight: 600, lineHeight: 1.35, color: '#FFFFFF' }}>
+              <h2
+                style={{
+                  margin: '0 0 14px',
+                  fontSize: 18,
+                  fontWeight: 600,
+                  lineHeight: 1.35,
+                  color: '#FFFFFF',
+                }}
+              >
                 {selected.label}
               </h2>
-              <p style={{ margin: '0 0 22px', fontSize: 13.5, lineHeight: 1.6, color: TEXT_SECONDARY }}>
+              <p
+                style={{
+                  margin: '0 0 22px',
+                  fontSize: 13.5,
+                  lineHeight: 1.6,
+                  color: TEXT_SECONDARY,
+                }}
+              >
                 {detailMeta}
               </p>
 
@@ -1082,7 +1202,9 @@ export default function GraphView({ teamId }: { teamId: string }) {
                         }}
                       >
                         <span style={shapeSwatchStyle(c.type, 8)} />
-                        <span style={{ fontSize: 12, color: TEXT_PRIMARY }}>{c.label}</span>
+                        <span style={{ fontSize: 12, color: TEXT_PRIMARY }}>
+                          {c.label}
+                        </span>
                       </button>
                     ))}
                   </div>
@@ -1102,11 +1224,20 @@ export default function GraphView({ teamId }: { teamId: string }) {
                 Slack evidence
               </div>
               {detailEvidence.length === 0 ? (
-                <p style={{ margin: 0, fontSize: 12.5, color: TEXT_FAINT, lineHeight: 1.5 }}>
+                <p
+                  style={{
+                    margin: 0,
+                    fontSize: 12.5,
+                    color: TEXT_FAINT,
+                    lineHeight: 1.5,
+                  }}
+                >
                   No sourced Slack messages yet for this node.
                 </p>
               ) : (
-                <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+                <div
+                  style={{ display: 'flex', flexDirection: 'column', gap: 10 }}
+                >
                   {detailEvidence.map((ev, i) => (
                     <div
                       key={i}
@@ -1117,10 +1248,26 @@ export default function GraphView({ teamId }: { teamId: string }) {
                         padding: '12px 13px',
                       }}
                     >
-                      <p style={{ margin: '0 0 9px', fontSize: 13, lineHeight: 1.55, color: TEXT_PRIMARY }}>
+                      <p
+                        style={{
+                          margin: '0 0 9px',
+                          fontSize: 13,
+                          lineHeight: 1.55,
+                          color: TEXT_PRIMARY,
+                        }}
+                      >
                         {ev.text}
                       </p>
-                      <div style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 11, fontFamily: mono, color: TEXT_MUTED }}>
+                      <div
+                        style={{
+                          display: 'flex',
+                          alignItems: 'center',
+                          gap: 8,
+                          fontSize: 11,
+                          fontFamily: mono,
+                          color: TEXT_MUTED,
+                        }}
+                      >
                         <span>{ev.channel}</span>
                         <span>&middot;</span>
                         <span>{ev.time}</span>
@@ -1167,9 +1314,25 @@ export default function GraphView({ teamId }: { teamId: string }) {
                 gap: 12,
               }}
             >
-              <div style={{ width: 44, height: 44, borderRadius: '50%', border: `1.5px dashed ${BORDER_STRONG}` }} />
-              <p style={{ margin: 0, fontSize: 13.5, color: TEXT_FAINT, lineHeight: 1.6, maxWidth: 200 }}>
-                Select a person, project, or decision to see who actually knows this.
+              <div
+                style={{
+                  width: 44,
+                  height: 44,
+                  borderRadius: '50%',
+                  border: `1.5px dashed ${BORDER_STRONG}`,
+                }}
+              />
+              <p
+                style={{
+                  margin: 0,
+                  fontSize: 13.5,
+                  color: TEXT_FAINT,
+                  lineHeight: 1.6,
+                  maxWidth: 200,
+                }}
+              >
+                Select a person, project, or decision to see who actually knows
+                this.
               </p>
             </div>
           )}

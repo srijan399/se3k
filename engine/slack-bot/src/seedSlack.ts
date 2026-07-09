@@ -10,9 +10,8 @@ const args = process.argv.slice(2);
 const dryRun = args.includes('--dry-run');
 const clearMode = args.includes('--clear'); // delete seeded messages instead of posting
 const onlyIdx = args.indexOf('--only');
-const only = onlyIdx >= 0 ? args[onlyIdx + 1] : undefined; // channel to limit to
+const only = onlyIdx >= 0 ? args[onlyIdx + 1] : undefined;
 const fileIdx = args.indexOf('--file');
-// Which script to seed from (relative to engine/). Default: the full demo.
 const CONVO_FILE = path.resolve(
   __dirname,
   '../..',
@@ -22,7 +21,7 @@ const CONVO_FILE = path.resolve(
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
 interface SeedLine {
-  channel: string; // "backend" | "frontend"
+  channel: string;
   name: string;
   text: string;
 }
@@ -69,8 +68,6 @@ async function resolveChannels(
   return map;
 }
 
-// Resolve "backend"/"frontend" → channel ids, preferring ids pinned in
-// seed-users.json, else looking them up with the bot token.
 async function targetChannelIds(
   tokens: { channels?: Record<string, string> },
   needed: Set<string>,
