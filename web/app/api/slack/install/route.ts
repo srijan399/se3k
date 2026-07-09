@@ -30,5 +30,10 @@ export async function GET(req: NextRequest) {
   url.searchParams.set('client_id', clientId);
   url.searchParams.set('scope', SCOPES);
   url.searchParams.set('redirect_uri', redirectUri);
+  // Force a specific workspace when known — without this, Slack defaults to
+  // whichever workspace session is active in the browser and won't offer a
+  // picker for workspaces you haven't separately signed into.
+  const team = new URL(req.url).searchParams.get('team');
+  if (team) url.searchParams.set('team', team);
   return NextResponse.redirect(url.toString());
 }

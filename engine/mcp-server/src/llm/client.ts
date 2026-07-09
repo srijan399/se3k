@@ -43,6 +43,7 @@ export async function chat(opts: ChatOptions): Promise<string> {
       const res = await client.chat.completions.create({
         model: LLM_MODEL,
         temperature: opts.temperature ?? 0.1,
+        max_tokens: 4096,
         response_format: opts.json ? { type: 'json_object' } : undefined,
         messages: [
           { role: 'system', content: opts.system },

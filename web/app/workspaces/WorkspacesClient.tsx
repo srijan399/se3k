@@ -1,6 +1,6 @@
 'use client';
 
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import Link from 'next/link';
 import AddToSlackButton from '../../components/AddToSlackButton';
 import { inter, plexMono, sans, mono } from '../fonts';
@@ -28,6 +28,8 @@ interface BackfillJob {
   error: string | null;
 }
 
+const DIALOG_TRANSITION_MS = 180;
+
 const pillButton = (color: string, borderColor: string) => ({
   textDecoration: 'none',
   color,
@@ -53,6 +55,36 @@ export default function WorkspacesClient({
   const [selected, setSelected] = useState<Record<string, Set<string>>>({});
   const [autoJoin, setAutoJoin] = useState<Record<string, boolean>>({});
   const [jobs, setJobs] = useState<Record<string, BackfillJob | null>>({});
+  const [uninstallTarget, setUninstallTarget] = useState<{
+    teamId: string;
+    teamName: string | null;
+  } | null>(null);
+  const [dialogMounted, setDialogMounted] = useState(false);
+  const [dialogVisible, setDialogVisible] = useState(false);
+  const closeTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  useEffect(() => {
+    return () => {
+      if (closeTimer.current) clearTimeout(closeTimer.current);
+    };
+  }, []);
+
+  const openUninstallDialog = (teamId: string, teamName: string | null) => {
+    if (closeTimer.current) clearTimeout(closeTimer.current);
+    setUninstallTarget({ teamId, teamName });
+    setDialogMounted(true);
+    // Mount at the "hidden" position first, then flip to visible on the next
+    // frame so the transition actually has a starting state to animate from.
+    requestAnimationFrame(() => requestAnimationFrame(() => setDialogVisible(true)));
+  };
+
+  const closeUninstallDialog = () => {
+    setDialogVisible(false);
+    closeTimer.current = setTimeout(() => {
+      setDialogMounted(false);
+      setUninstallTarget(null);
+    }, DIALOG_TRANSITION_MS);
+  };
 
   const loadInstalls = useCallback(async () => {
     const res = await fetch('/api/workspaces', { cache: 'no-store' });
@@ -138,14 +170,6 @@ export default function WorkspacesClient({
 
   const uninstall = async (teamId: string, teamName: string | null) => {
     const who = teamName || teamId;
-    if (
-      !confirm(
-        `Uninstall SE3K from ${who}?\n\n` +
-          'This removes SE3K from your Slack workspace and permanently deletes its graph, ' +
-          'backfill history, and dedupe records. You can re-add it anytime with "Add to Slack".',
-      )
-    )
-      return;
     const res = await fetch(`/api/workspaces/${teamId}`, { method: 'DELETE' });
     if (!res.ok) {
       const d = await res.json().catch(() => ({}));
@@ -383,7 +407,7 @@ export default function WorkspacesClient({
                     </button>
                     <button
                       onClick={() =>
-                        uninstall(install.teamId, install.teamName)
+                        openUninstallDialog(install.teamId, install.teamName)
                       }
                       style={pillButton('#E01E5A', 'rgba(224,30,90,0.4)')}
                     >
@@ -562,6 +586,100 @@ export default function WorkspacesClient({
           })}
         </div>
       </div>
+
+      {dialogMounted && uninstallTarget && (
+        <div
+          role="presentation"
+          onClick={closeUninstallDialog}
+          style={{
+            position: 'fixed',
+            inset: 0,
+            background: dialogVisible
+              ? 'rgba(0,0,0,0.55)'
+              : 'rgba(0,0,0,0)',
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            padding: '24px',
+            zIndex: 1000,
+            transition: `background ${DIALOG_TRANSITION_MS}ms ease`,
+          }}
+        >
+          <div
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="uninstall-dialog-title"
+            onClick={(e) => e.stopPropagation()}
+            style={{
+              background: '#2B0A32',
+              border: '1px solid rgba(255,255,255,0.1)',
+              borderRadius: '16px',
+              padding: '28px',
+              maxWidth: '420px',
+              width: '100%',
+              boxShadow: '0 20px 60px rgba(0,0,0,0.5)',
+              opacity: dialogVisible ? 1 : 0,
+              transform: dialogVisible
+                ? 'scale(1) translateY(0)'
+                : 'scale(0.94) translateY(10px)',
+              transition: `opacity ${DIALOG_TRANSITION_MS}ms ease, transform ${DIALOG_TRANSITION_MS}ms cubic-bezier(0.16, 1, 0.3, 1)`,
+            }}
+          >
+            <h2
+              id="uninstall-dialog-title"
+              style={{
+                margin: '0 0 12px',
+                fontSize: '18px',
+                fontWeight: 700,
+                color: '#FFFFFF',
+              }}
+            >
+              Uninstall SE3K from{' '}
+              {uninstallTarget.teamName || uninstallTarget.teamId}?
+            </h2>
+            <p
+              style={{
+                margin: '0 0 24px',
+                fontSize: '14px',
+                lineHeight: 1.6,
+                color: '#D8C6DB',
+              }}
+            >
+              This removes SE3K from your Slack workspace and permanently
+              deletes its graph, backfill history, and dedupe records. You
+              can re-add it anytime with &ldquo;Add to Slack&rdquo;.
+            </p>
+            <div
+              style={{
+                display: 'flex',
+                justifyContent: 'flex-end',
+                gap: '10px',
+              }}
+            >
+              <button
+                onClick={closeUninstallDialog}
+                style={pillButton('#D8C6DB', 'rgba(255,255,255,0.15)')}
+              >
+                Cancel
+              </button>
+              <button
+                onClick={() => {
+                  const { teamId, teamName } = uninstallTarget;
+                  closeUninstallDialog();
+                  uninstall(teamId, teamName);
+                }}
+                style={{
+                  ...pillButton('#0F2E1F', 'transparent'),
+                  background: '#E01E5A',
+                  color: '#FFFFFF',
+                }}
+              >
+                Uninstall
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

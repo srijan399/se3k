@@ -131,7 +131,7 @@ async function resolveQuery(
   const person = store.findPersonByText(question);
   if (
     person &&
-    /(working on|work on|worked on|\bworking\b|\bdoing\b|up to|focus|\binvolved\b|responsible|\btasks?\b|contributing|been on|update on|status of|what (is|are|has|'?s) )/i.test(
+    /(working on|work on|worked on|\bworking\b|\bdoing\b|up to|focus|\binvolved\b|responsible|\btasks?\b|contributing|been on|\bupdate\b|\bstatus\b|what (is|are|has|'?s) )/i.test(
       question,
     )
   ) {

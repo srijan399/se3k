@@ -104,6 +104,17 @@ function bestRefByText(
   return bestScore >= 0.5 ? best : undefined;
 }
 
+// Slack message refs carry raw "<seconds>.<microseconds>" timestamps, not
+// ISO-8601 — new Date() can't parse them (silently → Invalid Date → NaN),
+// which broke every recency-weighted score in rankExperts/personActivity.
+// The LLM's own inferred "ts" fallback is already ISO-8601, so only convert
+// what actually looks like a Slack ts.
+function normalizeTs(ts: string): string {
+  const m = /^(\d{9,})(?:\.\d+)?$/.exec(ts);
+  if (!m) return ts;
+  return new Date(Number(m[1]) * 1000).toISOString();
+}
+
 // Stable, comparable id fragment for a human/label string.
 function slug(s: string): string {
   return s
@@ -398,7 +409,7 @@ export class GraphStore {
         continue;
       }
       const ref = lookupRef(refs, inv.ref) || bestRefByText(refs, inv.evidence);
-      const ts = ref?.ts || inv.ts;
+      const ts = normalizeTs(ref?.ts || inv.ts);
       this.addInvolvement(person.id, project.id, inv.weight || 1, ts, {
         ...channel,
         ts,
@@ -417,7 +428,7 @@ export class GraphStore {
         continue;
       }
       const ref = lookupRef(refs, de.ref) || bestRefByText(refs, de.evidence);
-      const ts = ref?.ts || de.ts;
+      const ts = normalizeTs(ref?.ts || de.ts);
       this.addEdge(de.type, person.id, decision.id, ts, {
         ...channel,
         ts,
