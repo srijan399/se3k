@@ -83,7 +83,7 @@ is I/O — now a persistent, multi-workspace service instead of a single-tenant
 sidecar:
 
 <p align="center">
-  <img src="web/public/archdiagram.png" alt="SE3K architecture" width="9000" height="600"/>
+  <img src="web/public/archdiagram.png" alt="SE3K architecture" width="850" height="600"/>
 </p>
 
 - **The bot** (Bolt, Socket Mode) is a genuine **MCP client**: it talks to the brain
