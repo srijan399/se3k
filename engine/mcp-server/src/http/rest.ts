@@ -114,6 +114,38 @@ rest.post(
   }),
 );
 
+rest.post(
+  '/internal/reset-graph/:teamId',
+  asyncHandler(async (req, res) => {
+    const { teamId } = req.params;
+    const counts = await db.transaction(async (tx) => {
+      const e = await tx
+        .delete(graphEdges)
+        .where(eq(graphEdges.teamId, teamId));
+      const n = await tx
+        .delete(graphNodes)
+        .where(eq(graphNodes.teamId, teamId));
+      const p = await tx
+        .delete(processedMessages)
+        .where(eq(processedMessages.teamId, teamId));
+      const j = await tx
+        .delete(backfillJobs)
+        .where(eq(backfillJobs.teamId, teamId));
+      return {
+        nodes: n.rowCount ?? 0,
+        edges: e.rowCount ?? 0,
+        processed: p.rowCount ?? 0,
+        jobs: j.rowCount ?? 0,
+      };
+    });
+    cache.clear();
+    dbg(
+      `reset-graph · team ${teamId} · ${JSON.stringify(counts)} (install kept)`,
+    );
+    res.json({ ok: true, ...counts });
+  }),
+);
+
 // ---- Graph (replaces web's raw fs.readFile of graph.json) -----------------
 
 rest.get(

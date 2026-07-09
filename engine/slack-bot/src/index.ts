@@ -427,9 +427,13 @@ async function backfill(
     `🕓 backfill · pulling up to ${limit} msgs from ${channelId} (team ${teamId})`,
   );
   try {
+    const oldest = await mcp.lastProcessedTs(teamId, channelId);
+    if (oldest) dbg(`   ↳ resuming from oldest=${oldest}`);
     const res = await client.conversations.history({
       channel: channelId,
       limit: Math.min(limit, BACKFILL_MAX),
+      oldest,
+      inclusive: false,
     });
     const msgs = (res.messages || []) as Array<{
       subtype?: string;
@@ -613,7 +617,11 @@ app.command(
         elements: [
           {
             type: 'button',
-            text: { type: 'plain_text', text: '📊 View live graph', emoji: true },
+            text: {
+              type: 'plain_text',
+              text: '📊 View live graph',
+              emoji: true,
+            },
             url,
             action_id: 'view_graph',
           },

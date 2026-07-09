@@ -2,7 +2,7 @@ import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { z } from 'zod';
 import { GraphStore } from './graph/store';
 import { MessageRefs } from './graph/types';
-import { filterProcessed, markProcessed } from './ingest/dedupe';
+import { filterProcessed, lastProcessedTs, markProcessed } from './ingest/dedupe';
 import { extractGraph } from './llm/extract';
 import { answerQuestion, sourceLines } from './llm/answer';
 import { seed } from './seed';
@@ -158,6 +158,20 @@ export function createMcpServer(): McpServer {
           },
         ],
       };
+    },
+  );
+
+  server.registerTool(
+    'get_last_processed_ts',
+    {
+      title: 'Last processed message ts',
+      description:
+        "The newest already-ingested message timestamp for a channel. The bot uses it as conversations.history's `oldest` so backfill only pulls new messages. Empty string if nothing is ingested yet.",
+      inputSchema: { teamId: z.string(), channelId: z.string() },
+    },
+    async ({ teamId, channelId }) => {
+      const ts = await lastProcessedTs(teamId, channelId);
+      return { content: [{ type: 'text', text: ts ?? '' }] };
     },
   );
 

@@ -57,12 +57,17 @@ Open **/workspaces** (`http://localhost:3000/workspaces` or `https://se3k.vercel
   ```bash
   # small #test channel (~18 msgs)
   pnpm -C engine/slack-bot seed:slack --file testing.txt              # add --dry-run to preview
-  pnpm -C engine/slack-bot seed:slack --file testing.txt --clear      # delete ONLY our messages
+  pnpm -C engine/slack-bot seed:slack --file testing.txt --clear      # delete our msgs + reset the graph
 
   # full demo (#backend + #frontend)
   pnpm -C engine/slack-bot seed:slack
   pnpm -C engine/slack-bot seed:slack --clear
   ```
+
+  `--clear` deletes only the messages we posted **and** resets the whole workspace graph
+  in the brain (nodes/edges/dedupe/jobs; install + tokens kept). It needs the brain
+  running at `MCP_SERVER_URL`. To clear the graph alone, use
+  `pnpm -C engine/mcp-server reset-graph <teamId>`.
 
 Wait ~20s for auto-flush (or run `/se3k-ingest`); the bot terminal shows `📥 ingested N`.
 

@@ -95,4 +95,17 @@ export const mcp = {
   seed: (teamId: string) => callTool('seed_demo', { teamId }),
   setPersonIds: (teamId: string, ids: Record<string, string>) =>
     callTool('set_person_ids', { teamId, ids }),
+  // Newest already-ingested ts for a channel — used as conversations.history
+  // `oldest` so backfill only pulls new messages. undefined if none/on error.
+  lastProcessedTs: async (
+    teamId: string,
+    channelId: string,
+  ): Promise<string | undefined> => {
+    try {
+      const ts = (await callTool('get_last_processed_ts', { teamId, channelId })).trim();
+      return ts || undefined;
+    } catch {
+      return undefined; // fall back to a full read
+    }
+  },
 };

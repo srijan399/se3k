@@ -28,6 +28,7 @@ OTHER RULES:
 - Prefer Slack user IDs as identity when present; otherwise the display name. Reuse the SAME kebab key across the batch for the same project/decision.
 - Only create a project/decision if it is genuinely discussed.
 - A DECISION is a real technical or product choice with a tradeoff or dissent (e.g. "adopt PgBouncer over one-connection-per-request", "ship optimistic cart updates"). Do NOT record jokes (e.g. "light vs dark toast"), UI nitpicks, routine tweaks (e.g. debouncing a click), or banter as decisions.
+- JOKES / SARCASM / HYPERBOLE ARE NEVER WORK OR DECISIONS. A sarcastic "approved", "ship it", "best line item ever", "our top priority" about something absurd or non-technical (adding "therapy" to the sprint budget, "next sprint's horror movie", tacos for lunch, buying the team a yacht) produces NOTHING — no person, project, decision, or edge. Real decisions are about the software/product and have a concrete tradeoff. When unsure whether a line is a serious work statement or a joke, LEAVE IT OUT.
 - For each real decision, capture the debate: emit a RAISED_CONCERN edge for anyone who pushed back (and why), and a MADE_CALL edge for whoever said the final call / "let's ship it". If the text contains a concern or a final call, you MUST emit those edges with the right person + ref.
 - Every input line is prefixed with a "[mN]" tag. In every involvement and decisionEdge, set "ref" to the [mN] tag of the SINGLE message that best evidences it (so the citation links to the exact Slack message).
 - "ts": use the message's real timestamp if given; otherwise infer chronological order with plausible recent ISO timestamps.
@@ -57,7 +58,18 @@ Correct output:
   "relations": [{ "decision": "adopt-pgbouncer", "project": "checkout-api" }]
 }
 
-Note how Adam OWNS checkout but gets weight 1 (he did not do the work), while Ivan gets 5. That ranking is the product. Output ONLY the JSON object.`;
+Note how Adam OWNS checkout but gets weight 1 (he did not do the work), while Ivan gets 5. That ranking is the product.
+
+NEGATIVE EXAMPLE — a joke thread carries no signal, so EVERYTHING is empty:
+Input:
+[m1] Ivan Sanders: no promises, that's next sprint's horror movie
+[m2] Rahul Sharma: adding "therapy" to the sprint budget then
+[m3] Adam Reyes: approved, easily our best-justified line item
+
+Correct output:
+{ "people": [], "projects": [], "decisions": [], "involvement": [], "decisionEdges": [], "relations": [] }
+
+Output ONLY the JSON object.`;
 
 const EMPTY: ExtractionResult = {
   people: [],

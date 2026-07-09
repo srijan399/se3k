@@ -1,18 +1,24 @@
-import { and, eq, inArray } from 'drizzle-orm';
+import { and, eq, inArray, sql } from 'drizzle-orm';
 import { db } from '../db/client';
 import { processedMessages } from '../db/schema';
 import { MessageRefs } from '../graph/types';
 
-// Shared idempotency gate for BOTH live ingestion (mcpTools.ts) and the
-// backfill runner (backfill/run.ts) — the two things that used to double-count
-// INVOLVED_IN weight when run as separate processes with no shared dedupe
-// state. Lines without a channelId/ts pass through unchecked.
-//
-// This only CHECKS prior processing — it does not record anything yet.
-// Callers must call markProcessed() after a successful ingest. Marking up
-// front (before extraction) would permanently blackhole a batch if the LLM
-// call happened to fail transiently — it'd be marked "seen" and never
-// retried even though nothing was ever extracted from it.
+export async function lastProcessedTs(
+  teamId: string,
+  channelId: string,
+): Promise<string | undefined> {
+  const [row] = await db
+    .select({ maxTs: sql<string | null>`max(${processedMessages.ts})` })
+    .from(processedMessages)
+    .where(
+      and(
+        eq(processedMessages.teamId, teamId),
+        eq(processedMessages.channelId, channelId),
+      ),
+    );
+  return row?.maxTs ?? undefined;
+}
+
 export async function filterProcessed(
   teamId: string,
   channelId: string | undefined,
@@ -66,8 +72,6 @@ export async function filterProcessed(
   return { lines: keptLines, refs: keptRefs, skipped, tsToMark };
 }
 
-// Commit the dedupe record — call ONLY after a successful ingest + saveTeam,
-// so a failed extraction leaves the batch unmarked and eligible for retry.
 export async function markProcessed(
   teamId: string,
   channelId: string | undefined,

@@ -3,15 +3,16 @@ import { eq } from 'drizzle-orm';
 import { db } from '../db/client';
 import { backfillJobs, installations } from '../db/schema';
 import { GraphStore } from '../graph/store';
-import { filterProcessed, markProcessed } from '../ingest/dedupe';
+import {
+  filterProcessed,
+  lastProcessedTs,
+  markProcessed,
+} from '../ingest/dedupe';
 import { extractGraph } from '../llm/extract';
 import { isNoise } from './noise';
 
 const dbg = (...args: unknown[]) => console.error('[se3k:backfill]', ...args);
 
-// Simple, hackathon-appropriate rate-limit backoff between paginated Slack
-// calls — not tuned against real Tier limits, just enough to not get 429'd
-// on a multi-thousand-message history pull.
 const PAGE_DELAY_MS = 1200;
 const BATCH_SIZE = 20; // messages per extraction batch
 
@@ -19,8 +20,6 @@ function sleep(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
-// Direct link to a Slack message, e.g. https://team.slack.com/archives/C123/p1720000000123456
-// Matches the live bot's permalink format so backfilled citations are clickable too.
 function permalinkFor(
   teamUrl: string | undefined,
   channelId: string,
@@ -173,8 +172,6 @@ async function runBackfillJob(
   const install = await getInstallation(teamId);
   const client = new WebClient(install.botToken);
 
-  // Workspace URL for building message permalinks, so backfilled citations link
-  // to the exact Slack message (the live path already does this). Best-effort.
   let teamUrl: string | undefined;
   try {
     teamUrl = (await client.auth.test()).url as string;
@@ -247,6 +244,9 @@ async function backfillChannel(
     await client.conversations.join({ channel: channel.id });
   } catch {}
 
+  const oldest = await lastProcessedTs(teamId, channel.id);
+  if (oldest) dbg(`#${channel.name} · resuming from oldest=${oldest}`);
+
   let cursor: string | undefined;
   let buffer: BufEntry[] = [];
   let count = 0;
@@ -289,6 +289,8 @@ async function backfillChannel(
       channel: channel.id,
       cursor,
       limit: 200,
+      oldest,
+      inclusive: false,
     });
     const msgs = (res.messages || []) as Array<{
       subtype?: string;
@@ -296,8 +298,6 @@ async function backfillChannel(
       text?: string;
       ts?: string;
     }>;
-    // Slack returns newest-first per page; process oldest-first within the
-    // page so involvement timestamps stay chronological.
     for (const m of [...msgs].reverse()) {
       if (m.subtype || !m.user || !m.text || isNoise(m.text)) continue;
       const name = await resolveUserName(client, m.user);

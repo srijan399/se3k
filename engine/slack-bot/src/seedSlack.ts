@@ -215,6 +215,55 @@ async function clearChannels(
   }
 }
 
+async function resetGraphViaBrain(): Promise<void> {
+  const botToken = process.env.SLACK_BOT_TOKEN;
+  if (!botToken) {
+    console.log(
+      '  (no SLACK_BOT_TOKEN — skipping graph reset; run `pnpm -C engine/mcp-server reset-graph <teamId>` manually)',
+    );
+    return;
+  }
+  let teamId: string | undefined;
+  try {
+    teamId = (
+      (await new WebClient(botToken).auth.test()) as { team_id?: string }
+    ).team_id;
+  } catch (e) {
+    console.error(
+      '  graph reset skipped — bot auth.test failed:',
+      (e as Error).message,
+    );
+    return;
+  }
+  if (!teamId) return;
+  const base = (process.env.MCP_SERVER_URL || 'http://localhost:4000').replace(
+    /\/$/,
+    '',
+  );
+  const secret = process.env.INTERNAL_API_SECRET;
+  try {
+    const r = await fetch(
+      `${base}/internal/reset-graph/${encodeURIComponent(teamId)}`,
+      {
+        method: 'POST',
+        headers: secret ? { 'x-internal-secret': secret } : undefined,
+      },
+    );
+    const j = (await r.json().catch(() => ({}))) as Record<string, unknown>;
+    if (r.ok)
+      console.log(`  🧹 graph reset (team ${teamId}): ${JSON.stringify(j)}`);
+    else
+      console.error(
+        `  graph reset failed (HTTP ${r.status}) — is the brain running at ${base}?`,
+      );
+  } catch (e) {
+    console.error(
+      `  graph reset failed — brain unreachable at ${base}:`,
+      (e as Error).message,
+    );
+  }
+}
+
 async function main() {
   const lines = parseConversations(CONVO_FILE).filter(
     (l) => !only || l.channel === only,
@@ -246,6 +295,10 @@ async function main() {
         .join(', ')}`,
     );
     await clearChannels(tokens, needed);
+    if (!dryRun) {
+      console.log('Resetting the workspace graph in the brain (team-wide)…');
+      await resetGraphViaBrain();
+    }
     return;
   }
 
