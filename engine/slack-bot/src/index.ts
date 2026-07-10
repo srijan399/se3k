@@ -674,13 +674,9 @@ app.event(
   },
 );
 
-// ---- Health endpoint --------------------------------------------------------
-// The bot itself talks to Slack over Socket Mode (outbound only), so it has no
-// inbound HTTP surface of its own. Render's web-service health check still
-// expects something listening on $PORT — without this, deploys get stuck
-// "waiting for open port" and restart-loop. This server exists only to
-// satisfy that check.
-const PORT = Number(process.env.PORT) || 3001;
+const wantHealthServer =
+  !!process.env.RENDER || process.env.HEALTHCHECK === '1';
+const HEALTH_PORT = Number(process.env.PORT) || 3001;
 const healthServer = http.createServer((req, res) => {
   if (req.url === '/health' || req.url === '/') {
     res.writeHead(200, { 'Content-Type': 'application/json' });
@@ -690,6 +686,17 @@ const healthServer = http.createServer((req, res) => {
   res.writeHead(404);
   res.end();
 });
+healthServer.on('error', (err) => {
+  const e = err as NodeJS.ErrnoException;
+  if (e.code === 'EADDRINUSE') {
+    console.error(
+      `[se3k:bot] health port :${HEALTH_PORT} is busy (a previous instance?). ` +
+        `The bot still runs; free it with: kill -9 $(lsof -ti:${HEALTH_PORT})`,
+    );
+  } else {
+    console.error('[se3k:bot] health server error:', err);
+  }
+});
 
 // URL buttons still deliver a block_actions payload that must be acked, or Slack
 // shows the user a "this app isn't responding" warning. The link opens client-side.
@@ -698,9 +705,11 @@ app.action('view_graph', async ({ ack }: { ack: () => Promise<void> }) => {
 });
 
 (async () => {
-  healthServer.listen(PORT, () => {
-    dbg(`🩺 health check listening on :${PORT}`);
-  });
+  if (wantHealthServer) {
+    healthServer.listen(HEALTH_PORT, () => {
+      dbg(`🩺 health check listening on :${HEALTH_PORT}`);
+    });
+  }
   await app.start();
   dbg('⚡️ SE3K bot online · Socket Mode · multi-workspace\n');
 })();

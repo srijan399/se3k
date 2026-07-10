@@ -56,7 +56,7 @@ Open **/workspaces** (`http://localhost:3000/workspaces` or `https://se3k.vercel
 
   ```bash
   # small #test channel (~18 msgs)
-  pnpm -C engine/slack-bot seed:slack --file testing.txt              # add --dry-run to preview
+  pnpm -C engine/slack-bot seed:slack --file testing.txt              
   pnpm -C engine/slack-bot seed:slack --file testing.txt --clear      # delete our msgs + reset the graph
 
   # full demo (#backend + #frontend)

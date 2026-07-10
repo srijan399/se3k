@@ -5,7 +5,12 @@ import * as cache from '../cache/semanticCache';
 
 const dbg = (...args: unknown[]) => console.error('[se3k:answer]', ...args);
 
-export type Intent = 'expertise' | 'provenance' | 'overview' | 'person';
+export type Intent =
+  | 'expertise'
+  | 'provenance'
+  | 'overview'
+  | 'person'
+  | 'general';
 
 export interface AnswerResult {
   text: string; // natural-language answer for Slack
@@ -104,53 +109,62 @@ function isSmallTalk(question: string): boolean {
   return false;
 }
 
-const ROUTER_SYSTEM = `You route a user's question in a team knowledge graph: label the intent and, when it's about ONE specific thing, pick the matching node id.
+const CLASSIFY_SYSTEM = `You are the router for SE3K, a Slack assistant that, from a team's real chat history, answers: who ACTUALLY knows about a topic (by demonstrated work), why a decision was made (and who dissented), what one person is working on, and overall team status.
 
-Return STRICT JSON only: { "intent": "expertise" | "provenance" | "overview", "targetId": "<an id from the catalog, or empty string>" }
+Classify the user's message into EXACTLY ONE intent and, when it's about a single catalog item, return that item's id.
 
-- "expertise" = "who knows / who do I talk to / who should I ask about X" (a SPECIFIC topic) → choose a PROJECT id.
-- "provenance" = "why did we decide / the reasoning / who pushed back on X" → choose a DECISION id.
-- "overview" = a BROAD status question with no single topic: "who's doing what", "give me an update", "what's everyone working on", "status", "who owns what". → "targetId": "" (no single node).
-- Pick the SINGLE best-matching id from the catalog. Match on meaning, not exact words. If nothing matches, "targetId": "".
+Return STRICT JSON ONLY: { "intent": "<intent>", "targetId": "<an id from the catalog, or empty string>" }
 
-EXAMPLES
-Catalog: {"projects":[{"id":"project:checkout-api","label":"Checkout API"},{"id":"project:cart-ui","label":"Cart / checkout UI"}],"decisions":[{"id":"decision:adopt-pgbouncer","label":"Adopt PgBouncer connection pooling"}]}
-Q: "who should I ask about checkout timing out?"      → {"intent":"expertise","targetId":"project:checkout-api"}
-Q: "who knows the cart page?"                          → {"intent":"expertise","targetId":"project:cart-ui"}
-Q: "why did we start using PgBouncer?"                 → {"intent":"provenance","targetId":"decision:adopt-pgbouncer"}
-Q: "give me an update of who is doing what"            → {"intent":"overview","targetId":""}
-Q: "what's everyone working on this week?"             → {"intent":"overview","targetId":""}
-Q: "who owns the mobile app?"                          → {"intent":"expertise","targetId":""}
+intent is one of:
+- "expertise"  — who knows / who to ask / who's best for a SPECIFIC topic. targetId = a PROJECT id.
+- "provenance" — why did we decide / the reasoning / who pushed back on a SPECIFIC decision. targetId = a DECISION id.
+- "person"     — what is <someone> doing / working on / responsible for / their status / their recent work. targetId = that PERSON's id.
+- "overview"   — broad team status with NO single subject: "who's doing what", "give me an update", "what's everyone working on".
+- "general"    — greetings, thanks, small talk, or meta questions about you ("who are you", "what can you do", "help"), or anything a team knowledge graph cannot answer. targetId "".
+
+Judge by MEANING, not keywords — phrasing is open-ended. Choose the SINGLE best-matching id; if none fits, targetId "".
+
+EXAMPLES (catalog omitted here for brevity):
+Q: "who should I ask about checkout timing out?"   -> {"intent":"expertise","targetId":"project:checkout-api"}
+Q: "any idea why we ditched redis for rate limits?"-> {"intent":"provenance","targetId":"decision:drop-redis-limiter"}
+Q: "what's Ivan been heads-down on lately?"        -> {"intent":"person","targetId":"person:U123"}
+Q: "give me the lay of the land, who's on what?"   -> {"intent":"overview","targetId":""}
+Q: "yo"                                            -> {"intent":"general","targetId":""}
+Q: "appreciate it, super helpful 🙏"               -> {"intent":"general","targetId":""}
+Q: "who owns the mobile app?"                      -> {"intent":"expertise","targetId":""}
 
 Output ONLY the JSON object.`;
 
-async function resolveQuery(
+const PERSON_HINT =
+  /(working on|work on|worked on|\bworking\b|\bdoing\b|up to|focus|\binvolved\b|responsible|\btasks?\b|contributing|been on|\bupdate\b|\bstatus\b|what (is|are|has|'?s) )/i;
+
+function normalizeIntent(s?: string): Intent {
+  return s === 'provenance' ||
+    s === 'overview' ||
+    s === 'person' ||
+    s === 'general'
+    ? s
+    : 'expertise';
+}
+
+async function route(
   store: GraphStore,
   question: string,
 ): Promise<{ intent: Intent; node?: GraphNode }> {
-  const person = store.findPersonByText(question);
-  if (
-    person &&
-    /(working on|work on|worked on|\bworking\b|\bdoing\b|up to|focus|\binvolved\b|responsible|\btasks?\b|contributing|been on|\bupdate\b|\bstatus\b|what (is|are|has|'?s) )/i.test(
-      question,
-    )
-  ) {
-    dbg(`🧭 router → person · ${person.label}`);
-    return { intent: 'person', node: person };
-  }
-
-  const projects = store.listProjects();
-  const decisions = store.listDecisions();
-
-  if (llmEnabled && projects.length + decisions.length > 0) {
+  if (llmEnabled) {
     try {
       const catalog = {
-        projects: projects.map((p) => ({ id: p.id, label: p.label })),
-        decisions: decisions.map((d) => ({ id: d.id, label: d.label })),
+        projects: store
+          .listProjects()
+          .map((p) => ({ id: p.id, label: p.label })),
+        decisions: store
+          .listDecisions()
+          .map((d) => ({ id: d.id, label: d.label })),
+        people: store.listPeople().map((p) => ({ id: p.id, label: p.label })),
       };
       const raw = await chat({
-        system: ROUTER_SYSTEM,
-        user: `Question: "${question}"\n\nCatalog (labels only):\n${JSON.stringify(catalog)}`,
+        system: CLASSIFY_SYSTEM,
+        user: `Message: "${question}"\n\nCatalog (choose targetId from these ids):\n${JSON.stringify(catalog)}`,
         json: true,
         temperature: 0,
       });
@@ -158,32 +172,32 @@ async function resolveQuery(
         intent?: string;
         targetId?: string;
       };
-      const intent: Intent =
-        parsed.intent === 'provenance'
-          ? 'provenance'
-          : parsed.intent === 'overview'
-            ? 'overview'
-            : 'expertise';
+      const intent = normalizeIntent(parsed.intent);
       dbg(
-        `🧭 router → ${intent}${parsed.targetId ? ` · ${parsed.targetId}` : ''}`,
+        `🧭 classify → ${intent}${parsed.targetId ? ` · ${parsed.targetId}` : ''}`,
       );
-      if (intent === 'overview') return { intent };
-      const node = parsed.targetId ? store.getNode(parsed.targetId) : undefined;
-      if (node) return { intent, node };
+      if (intent === 'general' || intent === 'overview') return { intent };
+      const byId = parsed.targetId ? store.getNode(parsed.targetId) : undefined;
+      if (intent === 'person')
+        return { intent, node: byId ?? store.findPersonByText(question) };
       return {
         intent,
         node:
-          intent === 'provenance'
+          byId ??
+          (intent === 'provenance'
             ? store.findDecisionByText(question)
-            : store.findProjectByText(question),
+            : store.findProjectByText(question)),
       };
     } catch (err) {
-      dbg('router LLM error, using keyword heuristic:', err);
+      dbg('classify LLM error, using keyword fallback:', err);
     }
   }
 
+  if (isSmallTalk(question)) return { intent: 'general' };
+  const person = store.findPersonByText(question);
+  if (person && PERSON_HINT.test(question))
+    return { intent: 'person', node: person };
   const intent = classify(question);
-  dbg(`🧭 router (keyword) → ${intent}`);
   if (intent === 'overview') return { intent };
   return {
     intent,
@@ -191,6 +205,36 @@ async function resolveQuery(
       intent === 'provenance'
         ? store.findDecisionByText(question)
         : store.findProjectByText(question),
+  };
+}
+
+// Casual conversation → a natural, on-brand reply (assistant mode): no graph
+// lookup, never invents team facts. Falls back to the canned help text.
+const ASSISTANT_SYSTEM = `You are SE3K, a friendly Slack assistant. From a team's real Slack activity you can answer: who ACTUALLY knows about a topic (ranked by demonstrated work, with sources), why a past decision was made (with the dissent), what one person is working on, and overall team status. The user's message is casual conversation, not one of those queries. Reply briefly, warmly, and Slack-friendly, and when it fits, nudge them toward what you can look up. NEVER invent facts about the team, its people, projects, or decisions — you have no data for this reply.`;
+
+async function assistantReply(question: string): Promise<AnswerResult> {
+  if (!llmEnabled) return { kind: 'general', sources: [], text: HELP_TEXT };
+  try {
+    const text = await chat({
+      system: ASSISTANT_SYSTEM,
+      user: question,
+      temperature: 0.6,
+    });
+    return { kind: 'general', sources: [], text: text.trim() || HELP_TEXT };
+  } catch (err) {
+    dbg('assistant reply error, using help text:', err);
+    return { kind: 'general', sources: [], text: HELP_TEXT };
+  }
+}
+
+// Asked about a specific @person we have no tracked work for.
+function unknownPersonReply(question: string): AnswerResult {
+  const m = question.match(/<@[UW][A-Z0-9]+(?:\|([^>]+))?>/i);
+  const who = m?.[1] ? `@${m[1]}` : 'that person';
+  return {
+    kind: 'unknown',
+    sources: [],
+    text: `I don't have any tracked work for ${who} yet — they may not have been active in a channel I've ingested.`,
   };
 }
 
@@ -259,27 +303,26 @@ async function overviewAnswer(
   const sources = perProject.flatMap((x) =>
     x.top.flatMap((t) => t.edge.sources.slice(-1)),
   );
-  const facts = perProject
+
+  const text = perProject
     .map((x) => {
       const lead = x.top[0];
       const ev = lead.edge.sources
         .map((s) => s.excerpt)
         .filter(Boolean)
         .slice(-1)
-        .join('');
+        .join('')
+        .replace(/[\s.]+$/, '')
+        .trim();
       const others = x.top.slice(1).map((t) => t.person.label);
-      return `${x.project.label}: ${lead.person.label} is driving it (score ${lead.score.toFixed(1)}${
-        ev ? `, e.g. "${ev}"` : ''
-      })${others.length ? `; also ${others.join(', ')}` : ''}.`;
+      const evClause = ev ? `: ${ev}` : '';
+      const alsoClause = others.length
+        ? ` Also involved: ${others.join(', ')}.`
+        : '';
+      return `• *${x.project.label}* — **${lead.person.label}** is driving it${evClause}.${alsoClause}`;
     })
     .join('\n');
 
-  const text = await phrase(
-    `Question: "${question}"\n\nWho currently has the strongest DEMONSTRATED involvement per project (ranked by weight + recency, not formal assignment):\n\n${facts}\n\nWrite a concise Slack status update — one short bullet per project naming who's driving it and briefly what they're doing. Keep it skimmable. Do not invent projects or people not listed.`,
-    perProject
-      .map((x) => `• *${x.project.label}* — ${x.top[0].person.label}`)
-      .join('\n'),
-  );
   return { kind: 'overview', text: renderForSlack(text, people), sources };
 }
 
@@ -316,15 +359,14 @@ export async function answerQuestion(
   store: GraphStore,
   question: string,
 ): Promise<AnswerResult> {
-  if (isSmallTalk(question)) {
-    dbg(`💬 small-talk · "${question.trim()}" → conversational reply`);
-    return { kind: 'unknown', sources: [], text: HELP_TEXT };
-  }
   const version = store.version();
   const { result, embedding } = await cache.lookup(question, version);
   if (result) return result;
   const ans = await computeAnswer(store, question);
-  await cache.store(question, ans, version, embedding);
+  // Don't cache casual/assistant replies — they're cheap to regenerate and we
+  // don't want a "hi" reply served back for a "thanks".
+  if (ans.kind !== 'general')
+    await cache.store(question, ans, version, embedding);
   return ans;
 }
 
@@ -333,19 +375,20 @@ async function computeAnswer(
   question: string,
 ): Promise<AnswerResult> {
   dbg(`🔮 answering · "${question}"`);
-  const { intent, node } = await resolveQuery(store, question);
+  const { intent, node } = await route(store, question);
 
-  if (intent === 'person') return personAnswer(store, node!, question);
+  if (intent === 'general') return assistantReply(question);
 
-  const mention = question.match(/<@[UW][A-Z0-9]+(?:\|([^>]+))?>/i);
-  if (mention && intent !== 'overview') {
-    const who = mention[1] ? `@${mention[1]}` : 'that person';
-    dbg(`🙈 unresolved person mention → ${who}`);
-    return {
-      kind: 'unknown',
-      sources: [],
-      text: `I don't have any tracked work for ${who} yet — they may not have been active in a channel I've ingested.`,
-    };
+  if (intent === 'person')
+    return node
+      ? personAnswer(store, node, question)
+      : unknownPersonReply(question);
+
+  // A query that @mentions a specific user but resolved no topic is really a
+  // person query the classifier under-labeled — handle it as one.
+  if (!node && /<@[UW][A-Z0-9]+/i.test(question)) {
+    const p = store.findPersonByText(question);
+    return p ? personAnswer(store, p, question) : unknownPersonReply(question);
   }
 
   if (intent === 'overview') return overviewAnswer(store, question);
