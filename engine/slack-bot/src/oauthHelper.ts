@@ -7,8 +7,16 @@ import { WebClient } from '@slack/web-api';
 
 // Prompt on the terminal (used when we can't auto-resolve a display name).
 function ask(q: string): Promise<string> {
-  const rl = readline.createInterface({ input: process.stdin, output: process.stdout });
-  return new Promise((res) => rl.question(q, (a) => { rl.close(); res(a.trim()); }));
+  const rl = readline.createInterface({
+    input: process.stdin,
+    output: process.stdout,
+  });
+  return new Promise((res) =>
+    rl.question(q, (a) => {
+      rl.close();
+      res(a.trim());
+    }),
+  );
 }
 
 const PORT = Number(process.env.OAUTH_HELPER_PORT) || 3030;
@@ -107,14 +115,15 @@ const server = http.createServer(async (req, res) => {
       /* best-effort */
     }
     let finalName = nameOverride || name;
-    // Fell back to the user id → name lookup failed (usually a stale
-    // SLACK_BOT_TOKEN). Ask instead of saving an unusable id key.
+
     if (!nameOverride && (!finalName || finalName === user.id)) {
       console.log(
         `\n⚠️  couldn't auto-resolve a display name (SLACK_BOT_TOKEN stale / missing users:read).`,
       );
       finalName =
-        (await ask('   Name to save this token under (must match your seed file): ')) ||
+        (await ask(
+          '   Name to save this token under (must match your seed file): ',
+        )) ||
         user.id ||
         '';
     }

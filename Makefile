@@ -3,3 +3,9 @@ clear-test:
 
 clear-channels:
 	pnpm -C engine/slack-bot seed:slack --clear
+
+seed-test:
+	pnpm -C engine/slack-bot seed:slack --file testing.txt
+
+seed:
+	pnpm -C engine/slack-bot seed:slack
