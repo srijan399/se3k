@@ -71,14 +71,24 @@ export async function startBackfillJob(
   return job.id;
 }
 
-async function joinAllPublicChannels(client: WebClient): Promise<void> {
+async function joinAllPublicChannels(
+  client: WebClient,
+  teamId: string,
+): Promise<void> {
   let cursor: string | undefined;
   do {
+    // team_id is required here even though the bot only serves one workspace
+    // — this sandbox's bot user turns out to be an org-wide (enterprise)
+    // install regardless of the manifest's org_deploy_enabled: false, and
+    // Slack can't infer which workspace's channels to list from an org-wide
+    // token without it. Channel-scoped calls (history/join/info) don't need
+    // it since a channel id already disambiguates the workspace.
     const res = await client.conversations.list({
       types: 'public_channel',
       exclude_archived: true,
       limit: 200,
       cursor,
+      team_id: teamId,
     });
     for (const c of res.channels || []) {
       if (c.id && !(c as { is_member?: boolean }).is_member) {
@@ -105,6 +115,7 @@ interface Channel {
 // the caller (web UI) before calling this, via conversations.join.
 async function listTargetChannels(
   client: WebClient,
+  teamId: string,
   channelIds?: string[],
 ): Promise<Channel[]> {
   if (channelIds && channelIds.length) {
@@ -127,6 +138,7 @@ async function listTargetChannels(
       exclude_archived: true,
       limit: 200,
       cursor,
+      team_id: teamId,
     });
     for (const c of res.channels || []) {
       if ((c as { is_member?: boolean }).is_member && c.id) {
@@ -180,10 +192,10 @@ async function runBackfillJob(
   }
 
   if (!channelIds?.length && autoJoinPublic) {
-    await joinAllPublicChannels(client);
+    await joinAllPublicChannels(client, teamId);
   }
 
-  const channels = await listTargetChannels(client, channelIds);
+  const channels = await listTargetChannels(client, teamId, channelIds);
   await setJob(jobId, { channelsTotal: channels.length });
   dbg(`job ${jobId} · team ${teamId} · ${channels.length} channel(s)`);
 

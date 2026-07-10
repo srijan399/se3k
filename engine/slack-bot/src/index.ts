@@ -168,7 +168,9 @@ async function ensureBootstrapped(
   }
 
   try {
-    const res = await client.users.list({ limit: 500 });
+    // team_id required for this org-wide bot token — see the comment on
+    // joinAllPublicChannels in mcp-server/src/backfill/run.ts.
+    const res = await client.users.list({ limit: 500, team_id: teamId });
     const ids: Record<string, string> = {};
     for (const u of (res.members || []) as Array<{
       id?: string;
@@ -250,22 +252,19 @@ function permalinkFor(
   return `${teamUrl}archives/${channelId}/p${ts.replace('.', '')}`;
 }
 
-// Bare key-gated URL to this workspace's graph in the web dashboard (or null if
-// no DASHBOARD_KEY). Used for the Block Kit "View live graph" button.
-function dashboardUrl(teamId: string): string | null {
-  const key = process.env.DASHBOARD_KEY;
-  if (!key) return null;
+// URL to the web dashboard's graph view. It's gated by "Sign in with Slack"
+// (session cookie), not a shared key — whoever clicks it signs in and sees
+// only their own team's graph, so no per-team link construction is needed.
+function dashboardUrl(): string {
   const base = (process.env.GATEWAY_URL || 'http://localhost:3000').replace(
     /\/$/,
     '',
   );
-  return `${base}/g/${key}?team=${encodeURIComponent(teamId)}`;
+  return `${base}/g`;
 }
 
-// Key-gated link to this workspace's graph in the web dashboard.
-function dashboardLink(teamId: string): string {
-  const url = dashboardUrl(teamId);
-  return url ? `\n🔗 View the live graph: ${url}` : '';
+function dashboardLink(): string {
+  return `\n🔗 View the live graph: ${dashboardUrl()}`;
 }
 
 // Build a Block Kit message for an answer: optional question echo (ask-graph),
@@ -607,12 +606,9 @@ app.command(
     stateFor(teamId).backfilledChannels.add(command.channel_id);
     const n = await backfill(client, teamId, command.channel_id, count);
     const backfillText = `🕓 Backfilled ${n} messages from this channel into the graph.`;
-    const url = dashboardUrl(teamId);
     const blocks: unknown[] = [
       { type: 'section', text: { type: 'mrkdwn', text: `*${backfillText}*` } },
-    ];
-    if (url) {
-      blocks.push({
+      {
         type: 'actions',
         elements: [
           {
@@ -622,14 +618,14 @@ app.command(
               text: '📊 View live graph',
               emoji: true,
             },
-            url,
+            url: dashboardUrl(),
             action_id: 'view_graph',
           },
         ],
-      });
-    }
+      },
+    ];
     await respond({
-      text: `${backfillText}${dashboardLink(teamId)}`,
+      text: `${backfillText}${dashboardLink()}`,
       blocks: blocks as slack.KnownBlock[],
       response_type: 'ephemeral',
     });

@@ -188,11 +188,15 @@ rest.get(
     }> = [];
     let cursor: string | undefined;
     do {
+      // team_id required — see the comment on joinAllPublicChannels in
+      // backfill/run.ts for why this bot token needs it even though it's a
+      // single-workspace install.
       const r = await client.conversations.list({
         types: 'public_channel,private_channel',
         exclude_archived: true,
         limit: 200,
         cursor,
+        team_id: teamId,
       });
       for (const c of r.channels || []) {
         if (!c.id) continue;
@@ -232,7 +236,10 @@ rest.get(
       .select()
       .from(backfillJobs)
       .where(eq(backfillJobs.id, id));
-    if (!job) {
+    // jobId is a raw auto-increment int — a caller scoped to one team must
+    // not be able to probe another team's job by guessing adjacent ids.
+    const teamId = req.query.teamId as string | undefined;
+    if (!job || (teamId && job.teamId !== teamId)) {
       res.status(404).json({ error: 'not found' });
       return;
     }

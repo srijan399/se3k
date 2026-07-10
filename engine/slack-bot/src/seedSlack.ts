@@ -48,6 +48,22 @@ async function resolveChannels(
   bot: WebClient,
   names: Set<string>,
 ): Promise<Record<string, string>> {
+  // team_id required — this sandbox's bot token turns out to be an org-wide
+  // (enterprise) install, and conversations.list can't infer which
+  // workspace's channels to list from such a token without it. auth.test()
+  // doesn't help here: for an org-wide token it returns the *enterprise* id
+  // in team_id, and passing that fails with team_access_not_granted — the
+  // one specific workspace id has to come from the operator.
+  const teamId = process.env.TEAM_ID;
+  if (!teamId) {
+    throw new Error(
+      'TEAM_ID missing in slack-bot/.env — required to resolve channel ids ' +
+        '(this bot token is an org-wide/Enterprise Grid install, so the ' +
+        'specific workspace can\'t be inferred). Find it on the /workspaces ' +
+        'page, or pin channel ids directly in seed-users.json instead: ' +
+        '"channels": { "backend": "C123" }.',
+    );
+  }
   const map: Record<string, string> = {};
   let cursor: string | undefined;
   do {
@@ -56,6 +72,7 @@ async function resolveChannels(
       limit: 200,
       cursor,
       exclude_archived: true,
+      team_id: teamId,
     });
     for (const c of (res.channels || []) as Array<{
       id?: string;

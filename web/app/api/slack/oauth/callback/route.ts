@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { mcpFetch } from '../../../../lib/mcpServer';
+import { encodeSession, Session, SESSION_COOKIE, sessionCookieOptions } from '../../../../lib/session';
 
 interface OAuthAccessResponse {
   ok: boolean;
@@ -8,6 +9,11 @@ interface OAuthAccessResponse {
   bot_user_id?: string;
   scope?: string;
   team?: { id?: string; name?: string };
+  authed_user?: { id?: string };
+}
+
+interface UserInfoResponse {
+  user?: { real_name?: string; profile?: { real_name?: string } };
 }
 
 export async function GET(req: NextRequest) {
@@ -64,5 +70,36 @@ export async function GET(req: NextRequest) {
     }),
   });
 
-  return NextResponse.redirect(`${base}/workspaces?connected=${encodeURIComponent(result.team.id)}`);
+  const res = NextResponse.redirect(
+    `${base}/workspaces?connected=${encodeURIComponent(result.team.id)}`,
+  );
+
+  // Whoever completes this install flow IS the identity we scope the
+  // dashboard session to — authed_user.id is present even with no
+  // `user_scope` requested, so a second "Sign in with Slack" (OIDC) round
+  // trip isn't needed. This also sidesteps OIDC's Enterprise Grid quirk
+  // where sign-in resolves to the enterprise and never returns a team_id.
+  const userId = result.authed_user?.id;
+  if (userId) {
+    let name: string | undefined;
+    try {
+      const infoRes = await fetch(
+        `https://slack.com/api/users.info?user=${encodeURIComponent(userId)}`,
+        { headers: { Authorization: `Bearer ${result.access_token}` } },
+      );
+      const info = (await infoRes.json()) as UserInfoResponse;
+      name = info.user?.profile?.real_name || info.user?.real_name;
+    } catch {
+      /* best-effort display name only */
+    }
+    const session: Session = {
+      userId,
+      teamId: result.team.id,
+      teamName: result.team.name,
+      name,
+    };
+    res.cookies.set(SESSION_COOKIE, encodeSession(session), sessionCookieOptions);
+  }
+
+  return res;
 }

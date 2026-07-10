@@ -4,6 +4,7 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import Link from 'next/link';
 import AddToSlackButton from '../../components/AddToSlackButton';
 import { inter, plexMono, sans, mono } from '../fonts';
+import type { Session } from '../lib/session';
 
 interface Installation {
   teamId: string;
@@ -42,11 +43,7 @@ const pillButton = (color: string, borderColor: string) => ({
   cursor: 'pointer',
 });
 
-export default function WorkspacesClient({
-  dashboardKey,
-}: {
-  dashboardKey: string | null;
-}) {
+export default function WorkspacesClient({ session }: { session: Session }) {
   const [installs, setInstalls] = useState<Installation[]>([]);
   const [loading, setLoading] = useState(true);
   const [banner, setBanner] = useState<string | null>(null);
@@ -170,7 +167,9 @@ export default function WorkspacesClient({
 
   const uninstall = async (teamId: string, teamName: string | null) => {
     const who = teamName || teamId;
-    const res = await fetch(`/api/workspaces/${teamId}`, { method: 'DELETE' });
+    const res = await fetch(`/api/workspaces/${teamId}`, {
+      method: 'DELETE',
+    });
     if (!res.ok) {
       const d = await res.json().catch(() => ({}));
       setBanner(`Couldn't uninstall ${who}: ${d?.error || res.statusText}`);
@@ -181,10 +180,10 @@ export default function WorkspacesClient({
     setBanner(`Uninstalled ${who}.`);
   };
 
-  const dashboardHref = (teamId: string) =>
-    dashboardKey
-      ? `/g/${dashboardKey}?team=${encodeURIComponent(teamId)}`
-      : null;
+  const signOut = async () => {
+    await fetch('/api/auth/logout', { method: 'POST' });
+    window.location.href = '/workspaces';
+  };
 
   return (
     <div
@@ -248,6 +247,19 @@ export default function WorkspacesClient({
           >
             &larr; Home
           </Link>
+          <span
+            style={{
+              fontSize: '12.5px',
+              color: '#7A6A7D',
+              fontFamily: mono,
+            }}
+          >
+            {session.name || session.userId} &middot;{' '}
+            {session.teamName || session.teamId}
+          </span>
+          <button onClick={signOut} style={pillButton('#D8C6DB', 'rgba(255,255,255,0.15)')}>
+            Sign out
+          </button>
           <AddToSlackButton />
         </div>
       </nav>
@@ -342,7 +354,6 @@ export default function WorkspacesClient({
           )}
           {installs.map((install) => {
             const job = jobs[install.teamId];
-            const href = dashboardHref(install.teamId);
             return (
               <div
                 key={install.teamId}
@@ -391,14 +402,12 @@ export default function WorkspacesClient({
                       flexShrink: 0,
                     }}
                   >
-                    {href && (
-                      <a
-                        href={href}
-                        style={pillButton('#D8C6DB', 'rgba(255,255,255,0.15)')}
-                      >
-                        View graph
-                      </a>
-                    )}
+                    <a
+                      href="/g"
+                      style={pillButton('#D8C6DB', 'rgba(255,255,255,0.15)')}
+                    >
+                      View graph
+                    </a>
                     <button
                       onClick={() => toggleExpand(install.teamId)}
                       style={pillButton('#D8C6DB', 'rgba(255,255,255,0.15)')}
