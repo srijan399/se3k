@@ -2,7 +2,7 @@ import 'dotenv/config';
 import http from 'node:http';
 import { App, LogLevel } from '@slack/bolt';
 import type { types as slack } from '@slack/bolt';
-import type { WebClient } from '@slack/web-api';
+import { WebClient } from '@slack/web-api';
 import { mcp, AskResult } from './mcpClient';
 
 interface BoltContext {
@@ -39,13 +39,6 @@ const MCP_HTTP_BASE = (
 ).replace(/\/$/, '');
 const INTERNAL_API_SECRET = process.env.INTERNAL_API_SECRET;
 
-// ---- Multi-workspace install lookup ----------------------------------------
-// Installations (bot token per team) live in mcp-server's Postgres, written
-// there by web's OAuth callback. We resolve per-team here via `authorize`
-// instead of a single static SLACK_BOT_TOKEN — this is what lets one running
-// bot process serve every workspace that installs the app (Socket Mode +
-// `authorize` is a supported multi-team Bolt pattern; no ExpressReceiver
-// needed since `web` owns the actual OAuth UI).
 interface Installation {
   teamId: string;
   teamName: string | null;
@@ -57,29 +50,86 @@ const installationCache = new Map<
   string,
   { install: Installation; fetchedAt: number }
 >();
-const INSTALL_CACHE_TTL_MS = 60_000;
+
+const INSTALL_CACHE_TTL_MS = 10 * 60_000; // 10 min
+const RETRY_BACKOFF_MS = 30_000;
 
 async function fetchInstallation(teamId: string): Promise<Installation> {
   const cached = installationCache.get(teamId);
   if (cached && Date.now() - cached.fetchedAt < INSTALL_CACHE_TTL_MS) {
     return cached.install;
   }
-  const res = await fetch(
-    `${MCP_HTTP_BASE}/internal/installations/${encodeURIComponent(teamId)}`,
-    {
-      headers: INTERNAL_API_SECRET
-        ? { 'x-internal-secret': INTERNAL_API_SECRET }
-        : undefined,
-    },
-  );
-  if (!res.ok) {
-    throw new Error(
-      `no installation found for team ${teamId} (HTTP ${res.status})`,
+
+  // Serve the stale install and back off before hammering the brain again.
+  const serveStale = (reason: string): Installation => {
+    if (!cached) throw new Error(reason);
+    console.warn(`[se3k:bot] ${reason} — serving cached install for ${teamId}`);
+    installationCache.set(teamId, {
+      install: cached.install,
+      fetchedAt: Date.now() - INSTALL_CACHE_TTL_MS + RETRY_BACKOFF_MS,
+    });
+    return cached.install;
+  };
+
+  let res: Response;
+  try {
+    res = await fetch(
+      `${MCP_HTTP_BASE}/internal/installations/${encodeURIComponent(teamId)}`,
+      {
+        headers: INTERNAL_API_SECRET
+          ? { 'x-internal-secret': INTERNAL_API_SECRET }
+          : undefined,
+      },
+    );
+  } catch (err) {
+    return serveStale(
+      `install fetch network error (${(err as Error).message})`,
     );
   }
-  const install = (await res.json()) as Installation;
-  installationCache.set(teamId, { install, fetchedAt: Date.now() });
-  return install;
+
+  if (res.ok) {
+    const install = (await res.json()) as Installation;
+    installationCache.set(teamId, { install, fetchedAt: Date.now() });
+    return install;
+  }
+  if (res.status === 404) {
+    // Genuinely not installed (or uninstalled) — don't serve a stale token.
+    installationCache.delete(teamId);
+    throw new Error(`no installation found for team ${teamId}`);
+  }
+  // 429 / 5xx / cold start → transient. Keep serving the last-known install.
+  return serveStale(`install fetch HTTP ${res.status} for ${teamId}`);
+}
+
+// Fallback identity from a static SLACK_BOT_TOKEN — so the bot still works in
+// its home workspace when the app was installed OUTSIDE the OAuth dashboard flow
+// (e.g. the app-config "Install to Workspace" button, which never hits our
+// callback and so writes no DB install row). Resolved once via auth.test and
+// scoped to that token's own team, so multi-workspace OAuth installs are
+// unaffected (they resolve from the DB as normal).
+let fallbackInstall:
+  | { teamId?: string; botToken: string; botUserId?: string }
+  | null
+  | undefined; // undefined = not yet resolved, null = no token configured
+
+async function getFallbackInstall() {
+  if (fallbackInstall !== undefined) return fallbackInstall;
+  const token = process.env.SLACK_BOT_TOKEN;
+  if (!token) return (fallbackInstall = null);
+  try {
+    const r = (await new WebClient(token).auth.test()) as {
+      team_id?: string;
+      user_id?: string;
+    };
+    fallbackInstall = {
+      teamId: r.team_id,
+      botToken: token,
+      botUserId: r.user_id,
+    };
+  } catch {
+    fallbackInstall = { botToken: token }; // couldn't resolve team; still usable single-workspace
+  }
+  return fallbackInstall;
 }
 
 const app = new App({
@@ -89,12 +139,21 @@ const app = new App({
   logLevel: LogLevel.INFO,
   authorize: async ({ teamId }: { teamId?: string }) => {
     if (!teamId) throw new Error('authorize called without a teamId');
-    const install = await fetchInstallation(teamId);
-    return {
-      botToken: install.botToken,
-      botUserId: install.botUserId || undefined,
-      teamId,
-    };
+    try {
+      const install = await fetchInstallation(teamId);
+      return {
+        botToken: install.botToken,
+        botUserId: install.botUserId || undefined,
+        teamId,
+      };
+    } catch (err) {
+      const fb = await getFallbackInstall();
+      if (fb && (!fb.teamId || fb.teamId === teamId)) {
+        dbg(`ℹ️  no DB install for ${teamId}; using SLACK_BOT_TOKEN fallback`);
+        return { botToken: fb.botToken, botUserId: fb.botUserId, teamId };
+      }
+      throw err;
+    }
   },
 });
 
@@ -381,9 +440,6 @@ async function flush(client: WebClient, teamId: string, channelId: string) {
   }
 }
 
-// Buffer one message (fast-path deduped by ts), then flush by size or arm the
-// timer. Authoritative dedupe against a separate backfill job happens
-// server-side in mcp-server's ingest_messages handler.
 async function bufferMessage(
   client: WebClient,
   teamId: string,

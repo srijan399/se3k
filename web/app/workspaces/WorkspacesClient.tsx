@@ -95,6 +95,10 @@ export default function WorkspacesClient({ session }: { session: Session }) {
     const connected = params.get('connected');
     const error = params.get('error');
     if (connected) setBanner(`Connected workspace ${connected}.`);
+    else if (error === 'install_failed')
+      setBanner(
+        "Authorized with Slack, but couldn't reach the backend to finish the install. Give it a few seconds and click Add to Slack again.",
+      );
     else if (error) setBanner(`Slack OAuth error: ${error}`);
     if (connected || error) window.history.replaceState({}, '', '/workspaces');
   }, [loadInstalls]);

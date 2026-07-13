@@ -1,6 +1,11 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { mcpFetch } from '../../../../lib/mcpServer';
-import { encodeSession, Session, SESSION_COOKIE, sessionCookieOptions } from '../../../../lib/session';
+import {
+  encodeSession,
+  Session,
+  SESSION_COOKIE,
+  sessionCookieOptions,
+} from '../../../../lib/session';
 
 interface OAuthAccessResponse {
   ok: boolean;
@@ -16,6 +21,39 @@ interface UserInfoResponse {
   user?: { real_name?: string; profile?: { real_name?: string } };
 }
 
+const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
+
+// Store the install in the brain, retrying to ride out a Render cold start.
+// Returns true only once the brain confirms the write (HTTP 2xx).
+async function persistInstall(body: {
+  teamId: string;
+  teamName?: string;
+  botToken: string;
+  botUserId?: string;
+  scope?: string;
+}): Promise<boolean> {
+  const ATTEMPTS = 3;
+  for (let i = 0; i < ATTEMPTS; i++) {
+    try {
+      const res = await mcpFetch('/internal/installations', {
+        method: 'POST',
+        body: JSON.stringify(body),
+      });
+      if (res.ok) return true;
+      console.warn(
+        `[se3k] persistInstall(${body.teamId}) attempt ${i + 1}/${ATTEMPTS} → HTTP ${res.status}`,
+      );
+    } catch (err) {
+      console.warn(
+        `[se3k] persistInstall(${body.teamId}) attempt ${i + 1}/${ATTEMPTS} threw:`,
+        (err as Error).message,
+      );
+    }
+    if (i < ATTEMPTS - 1) await sleep(1500);
+  }
+  return false;
+}
+
 export async function GET(req: NextRequest) {
   const url = new URL(req.url);
   // Must byte-match the redirect_uri the install route sent to /authorize, or
@@ -25,7 +63,9 @@ export async function GET(req: NextRequest) {
   const code = url.searchParams.get('code');
   const error = url.searchParams.get('error');
   if (error) {
-    return NextResponse.redirect(`${base}/workspaces?error=${encodeURIComponent(error)}`);
+    return NextResponse.redirect(
+      `${base}/workspaces?error=${encodeURIComponent(error)}`,
+    );
   }
   if (!code) {
     return NextResponse.json({ error: 'missing ?code' }, { status: 400 });
@@ -59,26 +99,21 @@ export async function GET(req: NextRequest) {
     );
   }
 
-  await mcpFetch('/internal/installations', {
-    method: 'POST',
-    body: JSON.stringify({
-      teamId: result.team.id,
-      teamName: result.team.name,
-      botToken: result.access_token,
-      botUserId: result.bot_user_id,
-      scope: result.scope,
-    }),
+  const stored = await persistInstall({
+    teamId: result.team.id,
+    teamName: result.team.name,
+    botToken: result.access_token,
+    botUserId: result.bot_user_id,
+    scope: result.scope,
   });
+  if (!stored) {
+    return NextResponse.redirect(`${base}/workspaces?error=install_failed`);
+  }
 
   const res = NextResponse.redirect(
     `${base}/workspaces?connected=${encodeURIComponent(result.team.id)}`,
   );
 
-  // Whoever completes this install flow IS the identity we scope the
-  // dashboard session to — authed_user.id is present even with no
-  // `user_scope` requested, so a second "Sign in with Slack" (OIDC) round
-  // trip isn't needed. This also sidesteps OIDC's Enterprise Grid quirk
-  // where sign-in resolves to the enterprise and never returns a team_id.
   const userId = result.authed_user?.id;
   if (userId) {
     let name: string | undefined;
@@ -98,7 +133,11 @@ export async function GET(req: NextRequest) {
       teamName: result.team.name,
       name,
     };
-    res.cookies.set(SESSION_COOKIE, encodeSession(session), sessionCookieOptions);
+    res.cookies.set(
+      SESSION_COOKIE,
+      encodeSession(session),
+      sessionCookieOptions,
+    );
   }
 
   return res;
