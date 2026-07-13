@@ -114,6 +114,22 @@ over Streamable HTTP so both the bot and the dashboard are its clients;
 catch-up (`conversations.history`) and an explicit, paginated full-history job
 triggered from the dashboard for workspaces installing after years of activity.
 
+## 🚀 Run it locally
+
+Set `.env` in each of `engine/mcp-server`, `engine/slack-bot`, and `web` (Slack tokens,
+`DB_URL`, `GROQ_API_KEY`, and the **same** `INTERNAL_API_SECRET` in all three).
+
+```bash
+pnpm install                               # install deps for all three packages
+pnpm -C engine/mcp-server db:push          # one-time: create the Postgres tables
+pnpm -C engine/mcp-server dev              # the brain — MCP + graph, on :4000
+pnpm dev:bot                               # the Slack bot — Socket Mode
+pnpm -C web dev                            # the dashboard + OAuth install, on :3000
+```
+
+Then open `http://localhost:3000/workspaces` and click **Add to Slack** to connect a
+workspace. (Run the last three in separate terminals.)
+
 ## 🧪 See it in action
 
 Seed a channel with a scenario where **Ivan** quietly does the work while **Adam**
